@@ -59,4 +59,17 @@
 .category-row>.small{white-space:nowrap;margin-top:20px}
 .category-row>.category-actions{margin-top:20px;flex-shrink:0}
 @media(max-width:580px){.category-row{flex-wrap:wrap}.category-row label{flex-basis:100%}.category-row>.small,.category-row>.category-actions{margin-top:0}.category-row>.category-actions{margin-left:auto}.category-add{align-items:stretch;flex-direction:column}}
-@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+.completion-burst{position:fixed;width:244px;min-height:124px;z-index:30;pointer-events:none;animation:completion-float 1.25s ease-out both;isolation:isolate}
+.completion-content{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;padding:12px 15px;background:#102c2bf5;border:1px solid #61d8c3;border-radius:7px;box-shadow:0 10px 35px #0005;color:var(--cyan)}
+.completion-content>strong{font-size:13px;letter-spacing:1.4px}.completion-content>span{font-size:12px;color:#d4fff5}
+.completion-check{width:40px;height:40px;stroke:var(--cyan);fill:none;stroke-width:2}
+.completion-check circle{stroke:#377c74;stroke-width:1}.completion-check path{stroke-dasharray:1;stroke-dashoffset:1;animation:completion-draw .28s .05s ease-out forwards}
+.completion-halo{position:absolute;top:26px;left:calc(50% - 28px);width:56px;height:56px;border:1px solid var(--cyan);border-radius:50%;animation:completion-ring .65s ease-out both;z-index:1}
+.completion-pixel{position:absolute;left:50%;top:40%;width:4px;height:4px;background:var(--cyan);animation:completion-particles .85s ease-out both;z-index:2}
+.completion-pixel:nth-of-type(2n){background:var(--pink)}
+.completion-pixel:nth-of-type(1){--dx:-100px;--dy:-50px}.completion-pixel:nth-of-type(2){--dx:-75px;--dy:-80px}.completion-pixel:nth-of-type(3){--dx:65px;--dy:-75px}.completion-pixel:nth-of-type(4){--dx:110px;--dy:-35px}.completion-pixel:nth-of-type(5){--dx:100px;--dy:45px}.completion-pixel:nth-of-type(6){--dx:50px;--dy:75px}.completion-pixel:nth-of-type(7){--dx:-55px;--dy:70px}.completion-pixel:nth-of-type(8){--dx:-110px;--dy:30px}
+@keyframes completion-draw{to{stroke-dashoffset:0}}
+@keyframes completion-ring{from{transform:scale(.6);opacity:.6}to{transform:scale(2);opacity:0}}
+@keyframes completion-particles{0%{transform:translate(0,0);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),var(--dy));opacity:0}}
+@keyframes completion-float{0%{opacity:0;transform:translateY(8px) scale(.94)}18%,70%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-18px) scale(1)}}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}.completion-burst,.completion-check path{animation:none;transform:none;opacity:1}.completion-check path{stroke-dashoffset:0}.completion-halo,.completion-pixel{display:none}}

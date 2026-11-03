@@ -24,6 +24,33 @@
   let storedRaw=raw||null;
   function notify(text){$('#toast').textContent=text;$('#toast').hidden=false;clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>$('#toast').hidden=true,5000);}
   function preferences(){try{localStorage.setItem(VIEW,JSON.stringify(prefs));}catch{} }
+  function celebrateCompletion(rect,earnedXp,earnedCredits){
+    // The task may leave the active list immediately; use a temporary, non-interactive overlay.
+    $$('.completion-burst').forEach(node=>node.remove());
+    const burst=document.createElement('div');burst.className='completion-burst';burst.setAttribute('aria-hidden','true');
+    const x=rect?rect.left+rect.width/2:innerWidth/2,y=rect?rect.top+rect.height/2:innerHeight/2;
+    burst.style.left=Math.max(8,Math.min(innerWidth-260,x-122))+'px';
+    burst.style.top=Math.max(8,Math.min(innerHeight-150,y-60))+'px';
+    burst.innerHTML=`<span class="completion-halo"></span><div class="completion-content"><svg class="completion-check" viewBox="0 0 40 40"><circle cx="20" cy="20" r="18"/><path d="m11 20 6 6 13-14" pathLength="1"/></svg><strong>MISSION CLEARED</strong><span>${earnedXp||earnedCredits?'+'+earnedXp+' XP · +'+earnedCredits+' credits':'XP & credits already earned'}</span></div>${'<i class="completion-pixel"></i>'.repeat(8)}`;
+    document.body.append(burst);
+    setTimeout(()=>burst.remove(),1400);
+  }
+  async function setTaskStatus(id,value,origin){
+    const task=state.tasks.find(t=>t.id===id);if(!task||task.status===value)return;
+    const previousXp=task.earnedXp||0,previousCredits=Q.balance(state);
+    const rect=origin.closest('.task-card')?.getBoundingClientRect();
+    const ok=await change(()=>Q.status(state,id,value),value==='done'?null:value==='queued'?'Mission reopened.':'Status updated.');
+    if(!ok){
+      const latest=state.tasks.find(t=>t.id===id);
+      if(latest&&origin.isConnected){if(origin.type==='checkbox')origin.checked=latest.status==='done';else origin.value=latest.status;}
+      return;
+    }
+    if(value==='done'){
+      const xp=Math.max(0,(state.tasks.find(t=>t.id===id)?.earnedXp||0)-previousXp),credits=Math.max(0,Q.balance(state)-previousCredits);
+      notify(xp||credits?`Mission cleared! +${xp} XP · +${credits} credits.`:'Mission cleared. XP and credits were already earned.');
+      if(currentPage==='missions')celebrateCompletion(rect,xp,credits);
+    }
+  }
   async function change(fn,message){
     if(saving){notify('A save is still in progress. Please try again in a moment.');return false;}
     if(storageBlocked){notify(shared?'Reconnect to your shared server before making changes.':'Storage is unavailable. Export a backup before making changes.');return false;}
@@ -232,8 +259,8 @@
     if(b.dataset.historyPage){historyPage+=Number(b.dataset.historyPage);renderHistory();}
   });
   $('#task-list').addEventListener('change',e=>{
-    const el=e.target;if(el.dataset.complete)change(()=>Q.status(state,el.dataset.complete,el.checked?'done':'queued'),el.checked?'Mission cleared. First completion earns XP and 10 credits.':'Mission reopened.');
-    if(el.dataset.status)change(()=>Q.status(state,el.dataset.status,el.value),'Status updated.');
+    const el=e.target;if(el.dataset.complete)setTaskStatus(el.dataset.complete,el.checked?'done':'queued',el);
+    if(el.dataset.status)setTaskStatus(el.dataset.status,el.value,el);
   });
   ['#task-search','#task-scope','#task-category'].forEach(id=>$(id).addEventListener('input',renderTasks));
   $('#group-by').onchange=e=>{prefs.group=e.target.value;preferences();renderTasks();};

@@ -149,6 +149,7 @@ Open http://localhost:8080. Docker publishes that port to network interfaces by 
 - Create/edit/remove personal rewards; redeem credits with confirmation. Receipts preserve the original name, cost and break duration after edits or removal. Breaks are personal promises, not externally delivered purchases.
 - Focus timer with 15/25/50-minute presets or 1–180 custom minutes, pause/resume/reset, collapsible controls, and completed session history. Timer completion doesn’t automatically complete the task or grant XP. Refresh or reopen the app to record a deadline reached while it was closed. No background alarm or notification is promised.
 - Responsive, keyboard-accessible UI using native forms and dialogs. No demo tasks or artificial starting credits are inserted.
+- Completing a task shows a brief neon checkmark, pixel burst and the actual XP/credit gain after the save succeeds. Both the checkbox and status dropdown support it. Reopened tasks show that rewards were already earned; failed/conflicting saves do not celebrate. Reduced-motion preferences use a static confirmation instead. The effect never blocks clicks or delays saving and adds no dependencies.
 
 ## Files and checks
 

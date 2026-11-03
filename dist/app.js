@@ -7,6 +7,11 @@
   const icon=name=>`<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
   const stamp=v=>v?new Date(v).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'—';
   const shared=!!globalThis.QUEST_SERVER?.enabled;
+  const needsServerUpdate=shared&&globalThis.QUEST_SERVER.categoryWeights!==true;
+  function serverCompatibility(){
+    $('#storage-error').hidden=!needsServerUpdate;
+    if(needsServerUpdate)$('#storage-error').textContent='Restart the updated server.py and reload this page before saving multi-category weights.';
+  }
   async function request(url,options={}){
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),6000);
     try{return await fetch(url,{...options,signal:controller.signal});}finally{clearTimeout(timeout);}
@@ -21,6 +26,7 @@
   }else{
     try{raw=localStorage.getItem(KEY);state=raw?Q.validate(JSON.parse(raw)):Q.initial();}catch(e){state=Q.initial();storageBlocked=true;$('#storage-error').hidden=false;$('#storage-error').textContent='Saved data could not be read. Changes are blocked to protect it. Export available data or try this browser’s normal mode.';}
   }
+  if(shared&&revision!==null)serverCompatibility();
   try{const p=JSON.parse(localStorage.getItem(VIEW)||'null');if(p&&['board','list'].includes(p.layout)&&['status','category','priority'].includes(p.group))prefs={...prefs,...p};}catch{}
   if(!['roi','priority','due'].includes(prefs.sort))prefs.sort='roi';
   let storedRaw=raw||null;
@@ -54,6 +60,7 @@
     }
   }
   async function change(fn,message){
+    if(needsServerUpdate){notify('Restart the updated server.py and reload before saving.');return false;}
     if(saving){notify('A save is still in progress. Please try again in a moment.');return false;}
     if(storageBlocked){notify(shared?'Reconnect to your shared server before making changes.':'Storage is unavailable. Export a backup before making changes.');return false;}
     saving=true;
@@ -62,7 +69,7 @@
       if(!shared&&localStorage.getItem(KEY)!==storedRaw)throw Error('Another tab changed your data. Reload this tab before continuing.');
       fn();const next=JSON.stringify(state);
       if(shared){
-        const response=await request('api/state',{method:'PUT',headers:{'Content-Type':'application/json','If-Match':'"'+revision+'"'},body:next});
+        const response=await request('api/state',{method:'PUT',headers:{'Content-Type':'application/json','If-Match':'"'+revision+'"','X-Quest-Schema':'category-weights-v1'},body:next});
         if(response.status===409){state=JSON.parse(before);await refreshShared(true);notify('Another device saved first. Your change was not applied; review the latest data and try again.');return false;}
         if(!response.ok)throw Error((await response.json()).error||'Could not save to the shared database.');
         const data=await response.json();state=Q.validate(data.state);revision=data.revision;
@@ -76,13 +83,13 @@
     polling=true;
     try{
       const response=await request('api/state',{cache:'no-store',headers:revision===null?{}:{'If-None-Match':'"'+revision+'"'}});
-      if(response.status===304){$('#storage-error').hidden=true;return;}
+      if(response.status===304){serverCompatibility();return;}
       if(!response.ok)throw Error('Shared server unavailable');
       const data=await response.json(),next=Q.validate(data.state);
       // A save may have begun while the GET was in flight. It owns the current state.
       if(saving&&!force)return;
       if(revision===null||data.revision>revision){state=next;revision=data.revision;storageBlocked=false;render();}
-      $('#storage-error').hidden=true;
+      serverCompatibility();
     }catch{$('#storage-error').hidden=false;$('#storage-error').textContent='Connection to the shared server was lost. Reconnect before editing; unsent changes will not be stored locally.';}
     finally{polling=false;}
   }
@@ -91,14 +98,19 @@
   $$('[data-close]').forEach(b=>b.onclick=()=>$('#'+b.dataset.close).close());
   function categories(){return state.categories.slice().sort((a,b)=>a.localeCompare(b));}
   function selectCategories(id){const el=$(id),value=el.value;el.innerHTML='<option value="">All categories</option>'+categories().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');el.value=categories().includes(value)?value:'';}
+  const selectedTaskCategories=()=>$$('#task-category-input input:checked').map(el=>el.value);
+  const selectTaskCategories=names=>{$$('#task-category-input input').forEach(el=>el.checked=names.includes(el.value));};
+  const categoryNames=t=>Q.taskCategories(t).slice().sort((a,b)=>a.localeCompare(b)).join(' + ');
+  const weightText=value=>value.toLocaleString(undefined,{maximumFractionDigits:1});
   function renderCategories(){
-    const select=$('#task-category-input'),selected=select.value;
-    select.innerHTML=categories().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
-    select.value=state.categories.includes(selected)?selected:state.categories[0];
+    let selected=selectedTaskCategories();
+    if(!$('#task-dialog').open&&!selected.length)selected=[state.categories[0]];
+    $('#task-category-input').innerHTML=categories().map(c=>`<label class="category-option"><input type="checkbox" name="taskCategory" value="${esc(c)}" aria-label="Select category ${esc(c)}" ${selected.includes(c)?'checked':''}><span>${esc(c)}</span><span class="weight-chip">×${weightText(Q.categoryWeight(state,c))}</span></label>`).join('');
     $('#category-list').innerHTML=categories().map((name,i)=>{
-      const count=state.tasks.filter(t=>t.category===name).length;
-      return `<form class="category-row" data-rename-category="${esc(name)}"><label for="category-edit-${i}">Category name<input id="category-edit-${i}" name="categoryName" value="${esc(name)}" required maxlength="40" aria-label="Rename ${esc(name)}"></label><span class="small">${count} task${count===1?'':'s'}</span><div class="category-actions"><button type="submit" aria-label="Save category ${esc(name)}">Save</button><button type="button" class="danger" data-delete-category="${esc(name)}" ${state.categories.length===1?'disabled':''}>Delete</button></div></form>`;
+      const count=state.tasks.filter(t=>Q.hasCategory(t,name)).length;
+      return `<form class="category-row" data-rename-category="${esc(name)}"><label for="category-edit-${i}">Category name<input id="category-edit-${i}" name="categoryName" value="${esc(name)}" required maxlength="40" aria-label="Rename ${esc(name)}"></label><label class="category-weight-label" for="category-weight-${i}">XP weight<input id="category-weight-${i}" name="categoryWeight" type="number" min="0.1" max="5" step="0.1" required value="${Q.categoryWeight(state,name)}" aria-label="XP weight for ${esc(name)}"></label><span class="small">${count} task${count===1?'':'s'}</span><div class="category-actions"><button type="submit" aria-label="Save category ${esc(name)}">Save</button><button type="button" class="danger" data-delete-category="${esc(name)}" ${state.categories.length===1?'disabled':''}>Delete</button></div></form>`;
     }).join('');
+    if($('#task-dialog').open)renderXpPreview();
   }
   function render(){
     const xp=Q.xp(state),level=Math.floor(xp/200)+1;
@@ -123,7 +135,7 @@
   const effortLabel={small:'Small',medium:'Medium',large:'Large',epic:'Major'};
   const statusLabel={queued:'Queued',progress:'In progress',done:'Completed'};
   function taskCard(t){
-    return `<article class="task-card ${t.status==='done'?'done':''} ${t.due<Q.day()&&t.status!=='done'?'is-overdue':''}"><input type="checkbox" data-complete="${esc(t.id)}" aria-label="Complete ${esc(t.title)}" ${t.status==='done'?'checked':''}><div class="task-main"><strong>${esc(t.title)}</strong>${t.due<Q.day()&&t.status!=='done'?'<span class="overdue-tag">OVERDUE</span>':''}<div class="task-meta"><span>${icon('tag')} ${esc(t.category)}</span><span>${esc(effortLabel[t.effort])} effort</span><span class="roi-estimate" title="Estimated available XP per hour, based on effort">${t.earnedXp?'Already rewarded':'≈'+Q.roiFor(t).toLocaleString(undefined,{maximumFractionDigits:1})+' XP/h'}</span><span class="priority ${t.priority}">${t.priority==='high'?'↑↑':t.priority==='medium'?'↑':'↓'} ${t.priority}</span><span class="${t.due<Q.day()&&t.status!=='done'?'overdue':''}">${esc(t.due)}${t.due<Q.day()&&t.status!=='done'?' · OVERDUE':''}</span><span class="xp-reward">${t.earnedXp?'✓ '+t.earnedXp:'+'+Q.xpFor(t.priority,t.effort)} XP</span></div></div><div class="task-actions"><select class="task-status" data-status="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v}</option>`).join('')}</select><div class="task-tools">${t.status!=='done'?`<button data-focus="${esc(t.id)}" aria-label="Focus on ${esc(t.title)}">${icon('timer')}</button>`:''}<button data-edit-task="${esc(t.id)}" aria-label="Edit ${esc(t.title)}">${icon('edit')}</button><button data-delete-task="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">${icon('trash')}</button></div></div></article>`;
+    return `<article class="task-card ${t.status==='done'?'done':''} ${t.due<Q.day()&&t.status!=='done'?'is-overdue':''}"><input type="checkbox" data-complete="${esc(t.id)}" aria-label="Complete ${esc(t.title)}" ${t.status==='done'?'checked':''}><div class="task-main"><strong>${esc(t.title)}</strong>${t.due<Q.day()&&t.status!=='done'?'<span class="overdue-tag">OVERDUE</span>':''}<div class="task-meta"><span>${icon('tag')} ${esc(categoryNames(t))}</span><span>${esc(effortLabel[t.effort])} effort</span><span class="roi-estimate" title="Estimated available XP per hour, based on effort">${t.earnedXp?'Already rewarded':'≈'+Q.roiFor(t,state).toLocaleString(undefined,{maximumFractionDigits:1})+' XP/h'}</span><span class="priority ${t.priority}">${t.priority==='high'?'↑↑':t.priority==='medium'?'↑':'↓'} ${t.priority}</span><span class="${t.due<Q.day()&&t.status!=='done'?'overdue':''}">${esc(t.due)}${t.due<Q.day()&&t.status!=='done'?' · OVERDUE':''}</span><span class="xp-reward">${t.earnedXp?'✓ '+t.earnedXp:'+'+Q.taskXp(state,t)} XP</span></div></div><div class="task-actions"><select class="task-status" data-status="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v}</option>`).join('')}</select><div class="task-tools">${t.status!=='done'?`<button data-focus="${esc(t.id)}" aria-label="Focus on ${esc(t.title)}">${icon('timer')}</button>`:''}<button data-edit-task="${esc(t.id)}" aria-label="Edit ${esc(t.title)}">${icon('edit')}</button><button data-delete-task="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">${icon('trash')}</button></div></div></article>`;
   }
   function renderTasks(){
     const today=Q.day(),scope=$('#task-scope').value,query=$('#task-search').value.toLowerCase(),cat=$('#task-category').value;
@@ -132,11 +144,11 @@
     $('#daily-completed').textContent=results.completed;$('#daily-xp').textContent=results.earnedXp;$('#daily-focus').textContent=results.focusMinutes.toLocaleString(undefined,{maximumFractionDigits:1});
     $('#daily-label').textContent=daily.length?`${done} of ${daily.length} missions due today cleared · ${results.completed} first completions today`:`No missions due today · ${results.completed} first completion${results.completed===1?'':'s'} today`;
     $('#daily-progress').max=daily.length||1;$('#daily-progress').value=done;
-    let rows=state.tasks.filter(t=>!t.deletedAt&&(scope==='done'?t.status==='done':t.status!=='done')&&(scope!=='today'||t.due===today)&&(scope!=='overdue'||t.due<today)&&(!cat||cat===t.category)&&(t.title+' '+t.category).toLowerCase().includes(query));
-    rows=Q.sortTasks(rows,prefs.sort,today);
+    let rows=state.tasks.filter(t=>!t.deletedAt&&(scope==='done'?t.status==='done':t.status!=='done')&&(scope!=='today'||t.due===today)&&(scope!=='overdue'||t.due<today)&&(!cat||Q.hasCategory(t,cat))&&(t.title+' '+categoryNames(t)).toLowerCase().includes(query));
+    rows=Q.sortTasks(rows,prefs.sort,today,state);
     const shown=prefs.layout==='list'?rows.slice(0,taskLimit):rows;
     $('#task-count').textContent=`${shown.length} of ${rows.length} matching`;
-    const groupFor=t=>prefs.group==='status'?statusLabel[t.status]:prefs.group==='priority'?t.priority[0].toUpperCase()+t.priority.slice(1)+' priority':t.category;
+    const groupFor=t=>prefs.group==='status'?statusLabel[t.status]:prefs.group==='priority'?t.priority[0].toUpperCase()+t.priority.slice(1)+' priority':categoryNames(t);
     const totals=new Map();rows.forEach(t=>totals.set(groupFor(t),(totals.get(groupFor(t))||0)+1));
     const groups=new Map();
     shown.forEach(t=>{const k=groupFor(t);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(t);});
@@ -152,7 +164,7 @@
     const tasks=Q.overdue(state);$('#overdue-banner').hidden=!tasks.length;
     $('#overdue-count').textContent=`${tasks.length} overdue mission${tasks.length===1?'':'s'} need${tasks.length===1?'s':''} a new plan`;
     const next=new Date();next.setDate(next.getDate()+1);
-    $('#overdue-list').innerHTML=tasks.map(t=>`<form class="overdue-row" data-reschedule="${esc(t.id)}"><h3>${esc(t.title)}</h3><p class="small">Was due ${esc(t.due)} · ${esc(t.category)} · ${effortLabel[t.effort]} effort</p><div class="form-grid"><label>New priority<select name="priority">${['low','medium','high'].map(p=>`<option value="${p}" ${p===t.priority?'selected':''}>${p} · ${Q.xpFor(p,t.effort)} XP${t.earnedXp?' estimate (already rewarded)':''}</option>`).join('')}</select></label><label>New due date<input name="due" type="date" min="${Q.day()}" value="${Q.day()}" required></label></div><div class="actions"><button type="button" data-due-preset="${Q.day()}">Today</button><button type="button" data-due-preset="${Q.day(next)}">Tomorrow</button><button type="submit" class="primary">Save new plan</button></div></form>`).join('')||'<p class="empty">All caught up. No overdue missions remain.</p>';
+    $('#overdue-list').innerHTML=tasks.map(t=>`<form class="overdue-row" data-reschedule="${esc(t.id)}"><h3>${esc(t.title)}</h3><p class="small">Was due ${esc(t.due)} · ${esc(categoryNames(t))} · ${effortLabel[t.effort]} effort</p><div class="form-grid"><label>New priority<select name="priority">${['low','medium','high'].map(p=>`<option value="${p}" ${p===t.priority?'selected':''}>${p} · ${Q.xpFor(p,t.effort,Q.taskWeight(state,t))} XP${t.earnedXp?' estimate (already rewarded)':''}</option>`).join('')}</select></label><label>New due date<input name="due" type="date" min="${Q.day()}" value="${Q.day()}" required></label></div><div class="actions"><button type="button" data-due-preset="${Q.day()}">Today</button><button type="button" data-due-preset="${Q.day(next)}">Tomorrow</button><button type="submit" class="primary">Save new plan</button></div></form>`).join('')||'<p class="empty">All caught up. No overdue missions remain.</p>';
   }
   $('#overdue-filter').onclick=()=>{$('#task-scope').value='overdue';$('#task-search').value='';$('#task-category').value='';taskLimit=5;renderTasks();$('#task-list').scrollIntoView({behavior:'smooth',block:'start'});};
   $('#overdue-list').addEventListener('submit',async e=>{e.preventDefault();const form=e.target;await change(()=>Q.reschedule(state,form.dataset.reschedule,form.elements.due.value,form.elements.priority.value),'Task rescheduled. Previous due date kept in history.');});
@@ -161,9 +173,9 @@
     const f=historyFilters(),rows=Q.history(state,f),size=30,pages=Math.max(1,Math.ceil(rows.length/size));historyPage=Math.min(historyPage,pages-1);
     const [start,end]=Q.range(f.date,f.period);const last=new Date(+end-1);
     $('#history-summary').textContent=`${start.toLocaleDateString()} – ${last.toLocaleDateString()} · ${rows.length} matching tasks`;
-    $('#history-list').innerHTML=rows.slice(historyPage*size,(historyPage+1)*size).map(t=>`<article class="history-card"><div class="between"><h3>${esc(t.title)}</h3><span class="small">${t.deletedAt?'Deleted':statusLabel[t.status]}</span></div><p class="small">${esc(t.category)} · ${t.priority} · ${esc(effortLabel[t.effort])} effort · due ${esc(t.due)} · ${t.earnedXp} XP earned</p><p class="small">Created ${stamp(t.createdAt)} · Completed ${stamp(t.completedAt)}</p><details><summary>Activity history (${t.events.length})</summary><ul>${t.events.map(e=>`<li>${esc(e.type)}${e.type==='category_changed'?' · '+esc(e.from)+' → '+esc(e.to):e.type==='rescheduled'?' · '+esc(e.fromDue)+' → '+esc(e.toDue)+' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):e.type==='reprioritized'?' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):''} · ${stamp(e.at)}</li>`).join('')}</ul></details>${!t.deletedAt?`<button class="icon-button" data-edit-task="${esc(t.id)}">${icon('edit')}Edit mission</button>`:''}</article>`).join('')||'<div class="empty">No tasks match this period and filters.</div>';
+    $('#history-list').innerHTML=rows.slice(historyPage*size,(historyPage+1)*size).map(t=>`<article class="history-card"><div class="between"><h3>${esc(t.title)}</h3><span class="small">${t.deletedAt?'Deleted':statusLabel[t.status]}</span></div><p class="small">${esc(categoryNames(t))} · ${t.priority} · ${esc(effortLabel[t.effort])} effort · due ${esc(t.due)} · ${t.earnedXp} XP earned</p><p class="small">Created ${stamp(t.createdAt)} · Completed ${stamp(t.completedAt)}</p><details><summary>Activity history (${t.events.length})</summary><ul>${t.events.map(e=>`<li>${esc(e.type)}${e.type==='category_changed'?' · '+esc(e.from)+' → '+esc(e.to):e.type==='rescheduled'?' · '+esc(e.fromDue)+' → '+esc(e.toDue)+' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):e.type==='reprioritized'?' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):''} · ${stamp(e.at)}</li>`).join('')}</ul></details>${!t.deletedAt?`<button class="icon-button" data-edit-task="${esc(t.id)}">${icon('edit')}Edit mission</button>`:''}</article>`).join('')||'<div class="empty">No tasks match this period and filters.</div>';
     if(pages>1)$('#history-list').insertAdjacentHTML('beforeend',`<div class="pager"><button data-history-page="-1" ${historyPage===0?'disabled':''}>← Previous</button><span>Page ${historyPage+1} / ${pages}</span><button data-history-page="1" ${historyPage===pages-1?'disabled':''}>Next →</button></div>`);
-    const sessions=state.sessions.filter(t=>new Date(t.endedAt)>=start&&new Date(t.endedAt)<end&&(!f.category||state.tasks.find(v=>v.id===t.taskId)?.category===f.category)&&t.title.toLowerCase().includes(f.query.toLowerCase())).slice().reverse();
+    const sessions=state.sessions.filter(t=>new Date(t.endedAt)>=start&&new Date(t.endedAt)<end&&(!f.category||Q.hasCategory(state.tasks.find(v=>v.id===t.taskId),f.category))&&t.title.toLowerCase().includes(f.query.toLowerCase())).slice().reverse();
     $('#sessions').innerHTML=sessions.map(t=>`<div class="list-line"><div>${esc(t.title)}<p>${stamp(t.endedAt)}</p></div><span>${Math.round(t.seconds/60)} min</span></div>`).join('')||'<p class="small">No completed focus sessions in this period.</p>';
   }
   function renderTimer(){
@@ -213,33 +225,35 @@
   $('#metrics-prev').onclick=()=>moveMetrics(-1);$('#metrics-next').onclick=()=>moveMetrics(1);
   function tickClock(){const left=state.timer?Q.remaining(state):selectedMinutes*60;$('#clock').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');}
   function openTask(id){
-    const t=state.tasks.find(t=>t.id===id);$('#task-form').reset();$('#task-id').value=t?.id||'';$('#task-form-title').textContent=t?'Edit mission':'New mission';$('#task-title').value=t?.title||'';$('#task-category-input').value=t?.category||state.categories[0];$('#task-priority').value=t?.priority||'medium';$('#task-effort').value=t?.effort||'medium';$('#task-due').value=t?.due||Q.day();renderXpPreview();$('#task-dialog').showModal();
+    const t=state.tasks.find(t=>t.id===id);$('#task-form').reset();$('#task-id').value=t?.id||'';$('#task-form-title').textContent=t?'Edit mission':'New mission';$('#task-title').value=t?.title||'';selectTaskCategories(t?Q.taskCategories(t):[state.categories[0]]);$('#task-priority').value=t?.priority||'medium';$('#task-effort').value=t?.effort||'medium';$('#task-due').value=t?.due||Q.day();renderXpPreview();$('#task-dialog').showModal();
   }
   function openReward(id){const r=state.rewards.find(r=>r.id===id);$('#reward-form').reset();$('#reward-id').value=r?.id||'';$('#reward-name').value=r?.name||'';$('#reward-cost').value=r?.cost||50;$('#reward-minutes').value=r?.minutes||'';$('#reward-dialog h2').textContent=r?'Edit reward':'New reward';$('#reward-dialog').showModal();}
   $('#category-form').onsubmit=async e=>{
     e.preventDefault();
-    if(await change(()=>Q.saveCategory(state,$('#category-name').value),'Category added.')){$('#category-form').reset();$('#category-name').focus();}
+    if(await change(()=>Q.saveCategory(state,$('#category-name').value,undefined,$('#category-weight').value),'Category added.')){$('#category-form').reset();$('#category-name').focus();}
   };
   $('#category-list').addEventListener('submit',async e=>{
     e.preventDefault();const form=e.target,previous=form.dataset.renameCategory;
-    const name=form.elements.categoryName.value.trim();
-    const selected=['#task-category','#history-category','#metrics-category','#task-category-input'].filter(id=>$(id).value===previous);
-    if(await change(()=>Q.saveCategory(state,name,previous),'Category updated.')){
-      selected.forEach(id=>$(id).value=name);renderTasks();renderHistory();renderMetrics();
+    const name=form.elements.categoryName.value.trim(),weight=form.elements.categoryWeight.value;
+    const assigned=selectedTaskCategories();
+    const selected=['#task-category','#history-category','#metrics-category'].filter(id=>$(id).value===previous);
+    if(await change(()=>Q.saveCategory(state,name,previous,weight),'Category updated. Earned XP was preserved.')){
+      selectTaskCategories(assigned.map(c=>c===previous?name:c));selected.forEach(id=>$(id).value=name);renderTasks();renderHistory();renderMetrics();if($('#task-dialog').open)renderXpPreview();
     }
   });
   $('#category-delete-form').onsubmit=async e=>{
     e.preventDefault();const name=$('#category-delete-name').value,replacement=$('#category-move-to').value;
-    const selected=$('#task-category-input').value===name;
-    if(await change(()=>Q.deleteCategory(state,name,replacement),'Category deleted. Existing tasks were kept.')){if(selected&&replacement)$('#task-category-input').value=replacement;$('#category-delete-dialog').close();}
+    const assigned=selectedTaskCategories();
+    if(await change(()=>Q.deleteCategory(state,name,replacement),'Category deleted. Existing tasks were kept.')){const remaining=assigned.filter(c=>c!==name);selectTaskCategories(remaining.length?remaining:replacement?[replacement]:[]);if($('#task-dialog').open)renderXpPreview();$('#category-delete-dialog').close();}
   };
   function renderXpPreview(){
-    const t=state.tasks.find(t=>t.id===$('#task-id').value),priority=$('#task-priority').value,effort=$('#task-effort').value;
-    $('#task-xp-preview').textContent=t?.earnedXp?`Already earned: ${t.earnedXp} XP. Editing or reopening won't grant additional XP.`:`${Q.xpFor(priority)} base XP × ${Q.effortFactors[effort]} effort = ${Q.xpFor(priority,effort)} XP on first completion`;
+    const t=state.tasks.find(t=>t.id===$('#task-id').value),priority=$('#task-priority').value,effort=$('#task-effort').value,categories=selectedTaskCategories(),draft={priority,effort,categories};
+    $('#task-xp-preview').textContent=t?.earnedXp?`Already earned: ${t.earnedXp} XP. Changes to categories, weights or effort won't change it.`:!categories.length?'Select at least one category.':`${Q.xpFor(priority)} base XP × ${Q.effortFactors[effort]} effort × ${weightText(Q.taskWeight(state,draft))} total category weight = ${Q.taskXp(state,draft)} XP on first completion (rounded). Categories: ${categories.map(c=>c+' ×'+weightText(Q.categoryWeight(state,c))).join(' + ')}`;
   }
   $('#task-priority').addEventListener('change',renderXpPreview);
   $('#task-effort').addEventListener('change',renderXpPreview);
-  $('#task-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.task(state,{title:$('#task-title').value,category:$('#task-category-input').value,priority:$('#task-priority').value,effort:$('#task-effort').value,due:$('#task-due').value},$('#task-id').value),'Mission saved.'))$('#task-dialog').close();};
+  $('#task-category-input').addEventListener('change',renderXpPreview);
+  $('#task-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.task(state,{title:$('#task-title').value,categories:selectedTaskCategories(),priority:$('#task-priority').value,effort:$('#task-effort').value,due:$('#task-due').value},$('#task-id').value),'Mission saved.'))$('#task-dialog').close();};
   $('#reward-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.reward(state,{name:$('#reward-name').value,cost:$('#reward-cost').value,minutes:$('#reward-minutes').value},$('#reward-id').value),'Reward saved.'))$('#reward-dialog').close();};
   document.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||b.disabled)return;
@@ -250,11 +264,11 @@
     if(b.dataset.duePreset)b.closest('form').elements.due.value=b.dataset.duePreset;
     if(b.dataset.action==='manage-categories'){renderCategories();$('#category-dialog').showModal();}
     if(b.dataset.deleteCategory){
-      const name=b.dataset.deleteCategory,count=state.tasks.filter(t=>t.category===name).length;
+      const name=b.dataset.deleteCategory,count=state.tasks.filter(t=>Q.hasCategory(t,name)).length,orphans=state.tasks.filter(t=>Q.hasCategory(t,name)&&Q.taskCategories(t).length===1).length;
       $('#category-delete-name').value=name;
-      $('#category-delete-summary').textContent=`Delete “${name}”? ${count} task record${count===1?' uses':'s use'} this category.`;
+      $('#category-delete-summary').textContent=`Delete “${name}”? ${count} task records use it; ${orphans} would have no category and need a replacement. Tasks with other categories will keep those categories. Previously earned XP stays fixed.`;
       $('#category-move-to').innerHTML=categories().filter(c=>c!==name).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
-      $('#category-move-label').hidden=!count;
+      $('#category-move-label').hidden=!orphans;
       $('#category-delete-dialog').showModal();
     }
     if(b.dataset.editTask)openTask(b.dataset.editTask);

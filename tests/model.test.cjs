@@ -130,3 +130,38 @@ test('recommended ROI sorting protects priority and overdue work before reward e
   Q.status(s,highQuick.id,'done');Q.status(s,highQuick.id,'queued');assert.equal(Q.roiFor(highQuick),0);
   assert.equal(Q.sortTasks(s.tasks,'roi','2026-11-03').at(-2).id,highQuick.id);
 });
+test('selected category weights add together and later edits never recalculate earned XP',()=>{
+  const s=Q.initial();Q.saveCategory(s,'Engineering',undefined,1.5);Q.saveCategory(s,'Learning',undefined,0.5);
+  const values={title:'Build and learn',categories:['Engineering','Learning'],priority:'medium',effort:'large',due:Q.day()};
+  const t=Q.task(s,values),pending=Q.task(s,{...values,title:'Next task'});
+  assert.equal(Q.taskWeight(s,t),2);assert.equal(Q.taskXp(s,t),120);assert.equal(Q.roiFor(t,s),60);
+  Q.status(s,t.id,'done');assert.equal(t.earnedXp,120);const ledger=JSON.stringify(s.ledger);
+  Q.saveCategory(s,'Engineering','Engineering',3.5);
+  assert.equal(Q.taskXp(s,pending),240);assert.equal(t.earnedXp,120);assert.equal(Q.xp(s),120);assert.equal(JSON.stringify(s.ledger),ledger);
+  Q.task(s,{...values,categories:['Engineering'],priority:'high',effort:'epic'},t.id);Q.status(s,t.id,'queued');Q.status(s,t.id,'done');
+  assert.equal(t.earnedXp,120);assert.equal(Q.balance(s),10);assert.equal(JSON.stringify(s.ledger),ledger);
+  assert.deepEqual(Q.validate(JSON.parse(JSON.stringify(s))),s);
+});
+test('multi-category filtering counts tasks once overall and deletion retains other assignments',()=>{
+  const s=Q.initial();Q.saveCategory(s,'Engineering',undefined,1.5);Q.saveCategory(s,'Learning',undefined,0.5);
+  const t=Q.task(s,{title:'Both areas',categories:['Engineering','Learning'],priority:'high',effort:'large',due:Q.day()});Q.status(s,t.id,'done');
+  s.sessions.push({id:'multi-focus',taskId:t.id,title:t.title,seconds:1500,startedAt:Q.now(),endedAt:Q.now()});
+  for(const category of ['', 'Engineering','Learning']){
+    const report=Q.metrics(s,Q.day(),'day',category,new Date(Date.now()+10));assert.equal(report.completed,1);assert.equal(report.earnedXp,160);assert.equal(report.focusMinutes,25);
+  }
+  assert.equal(Q.history(s,{date:Q.day(),period:'day',basis:'completed',category:'Learning'}).length,1);
+  Q.saveCategory(s,'Development','Engineering');assert.deepEqual(t.categories,['Development','Learning']);assert.equal(Q.categoryWeight(s,'Development'),1.5);
+  Q.deleteCategory(s,'Learning');assert.deepEqual(t.categories,['Development']);assert.equal(t.earnedXp,160);assert.equal(Q.xp(s),160);
+  assert.deepEqual(Q.validate(s),s);
+});
+test('legacy tasks default to a single 1x category; weights validate and fractional XP rounds consistently',()=>{
+  const s=Q.initial(),t=add(s);Q.status(s,t.id,'done');delete t.categories;delete s.categoryWeights;
+  const migrated=Q.validate(s);assert.deepEqual(migrated.tasks[0].categories,['Work']);assert.equal(Q.categoryWeight(migrated,'Work'),1);assert.equal(migrated.tasks[0].earnedXp,40);
+  for(const weight of [0,-1,0.01,1.25,5.1,NaN,Infinity])assert.throws(()=>Q.saveCategory(Q.initial(),'Bad',undefined,weight),/weight/);
+  Q.saveCategory(migrated,'Work','Work',0.7);assert.equal(Q.xpFor('medium','small',Q.categoryWeight(migrated,'Work')),11);
+  assert.equal(Q.xpFor('medium','epic',0.7),63);assert.equal(Q.xpFor('medium','large',0.1),6);
+  assert.throws(()=>Q.validate({...migrated,categoryWeights:{Work:0}}),/backup/);
+  assert.throws(()=>Q.validate({...migrated,tasks:[{...migrated.tasks[0],categories:['Work','Work']}]}),/backup/);
+  const unique=Q.task(migrated,{title:'Deduplicate',categories:['Work','work'],priority:'low',effort:'small',due:Q.day()});assert.deepEqual(unique.categories,['Work']);assert.equal(Q.taskWeight(migrated,unique),0.7);
+  Q.saveCategory(migrated,'__proto__',undefined,2);assert.equal(Q.categoryWeight(migrated,'__proto__'),2);assert.equal({}.polluted,undefined);
+});

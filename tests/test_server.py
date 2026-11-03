@@ -78,6 +78,33 @@ class StoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.write(2, value)
 
+    def test_weighted_multi_category_state_persists_and_legacy_records_migrate(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'test.sqlite3'
+            store = server_module.Store(path)
+            value = store.read()['state']
+            value['categoryWeights'] = {'Work': 1.5, 'Design': 0.5}
+            task = dict(id='multi-task', title='Weighted work', category='Work', categories=['Work', 'Design'], priority='high', effort='epic', due='2026-11-03', createdAt='2026-11-03T09:00:00Z', completedAt='2026-11-03T10:00:00Z', deletedAt=None, status='done', earnedXp=240, events=[])
+            value['tasks'] = [task]
+            store.write(1, value)
+            read = server_module.Store(path).read()['state']
+            self.assertEqual(read['categoryWeights'], {'Work': 1.5, 'Design': 0.5})
+            self.assertEqual(read['tasks'][0]['categories'], ['Work', 'Design'])
+            read['categoryWeights']['Work'] = 4
+            store.write(2, read)
+            self.assertEqual(store.read()['state']['tasks'][0]['earnedXp'], 240)
+            for bad_weight in [0, -1, 5.1, 1.25, True, '2']:
+                read['categoryWeights']['Work'] = bad_weight
+                with self.assertRaises(ValueError):
+                    store.write(3, read)
+            del value['categoryWeights']
+            del task['categories']
+            task['earnedXp'] = 40
+            migrated = server_module.validate(value)
+            self.assertEqual(migrated['categoryWeights'], {})
+            self.assertEqual(migrated['tasks'][0]['categories'], ['Work'])
+            self.assertEqual(migrated['tasks'][0]['earnedXp'], 40)
+
 
 class ApiTests(unittest.TestCase):
     @classmethod
@@ -100,7 +127,9 @@ class ApiTests(unittest.TestCase):
         self.server.password = None
 
     def request(self, path, method='GET', data=None, headers=None):
-        req = urllib.request.Request(self.url + path, method=method, data=data, headers=headers or {})
+        request_headers = {'X-Quest-Schema': 'category-weights-v1'} if method == 'PUT' else {}
+        request_headers.update(headers or {})
+        req = urllib.request.Request(self.url + path, method=method, data=data, headers=request_headers)
         try:
             response = self.client.open(req, timeout=3)
         except urllib.error.HTTPError as error:
@@ -143,6 +172,12 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(self.request(path)[0], 401)
             token = base64.b64encode(b'quest:test-only-password').decode()
             self.assertEqual(self.request(path, headers={'Authorization': 'Basic ' + token})[0], 200)
+
+    def test_old_browser_writes_require_reload_before_changing_rewards(self):
+        value = self.server.store.read()
+        response = self.request('/api/state', 'PUT', json.dumps(value['state']).encode(), {'Content-Type': 'application/json', 'If-Match': str(value['revision']), 'X-Quest-Schema': 'legacy'})
+        self.assertEqual(response[0], 426)
+        self.assertEqual(self.server.store.read()['revision'], value['revision'])
 
 
 if __name__ == '__main__':

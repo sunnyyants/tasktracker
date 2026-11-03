@@ -7,6 +7,7 @@ import hmac
 import ipaddress
 import json
 import mimetypes
+import math
 import os
 from pathlib import Path
 import socket
@@ -24,7 +25,7 @@ ASSETS = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js',
 
 
 def initial_state():
-    return dict(version=1, categories=['Work', 'Design', 'Deep work', 'Admin'], tasks=[], ledger=[], sessions=[], timer=None, rewards=[
+    return dict(version=1, categories=['Work', 'Design', 'Deep work', 'Admin'], categoryWeights={}, tasks=[], ledger=[], sessions=[], timer=None, rewards=[
         dict(id=str(uuid4()), name=name, cost=cost, minutes=minutes)
         for name, cost, minutes in [('Coffee break', 50, 10), ('Game time', 100, 30), ('Off-grid reset', 30, 15)]])
 
@@ -58,9 +59,12 @@ def validate(s):
         except (TypeError, ValueError):
             raise ValueError('Invalid task date.')
         require(timestamp(t.get('createdAt')) and (not t.get('completedAt') or timestamp(t['completedAt'])) and (not t.get('deletedAt') or timestamp(t['deletedAt'])))
-        require(type(t.get('earnedXp')) is int and t['earnedXp'] in [0, 10, 15, 20, 30, 40, 45, 60, 80, 90, 120])
+        require(integer(t.get('earnedXp'), 0, 120000))
         require(t.get('effort', 'medium') in ['small', 'medium', 'large', 'epic'])
         t.setdefault('effort', 'medium')
+        assigned = t.get('categories', [t['category']])
+        require(isinstance(assigned, list) and 1 <= len(assigned) <= 200)
+        require(all(text(c, 40) and c.strip() and c == c.strip() for c in assigned))
         require(isinstance(t.get('events'), list) and len(t['events']) <= 50000)
         require(all(isinstance(e, dict) and text(e.get('type'), 30) and timestamp(e.get('at')) for e in t['events']))
     for r in s['rewards']:
@@ -80,17 +84,28 @@ def validate(s):
     categories = s.get('categories')
     if 'categories' not in s:
         names = {}
-        for name in ['Work', 'Design', 'Deep work', 'Admin'] + [t['category'] for t in s['tasks']]:
+        for name in ['Work', 'Design', 'Deep work', 'Admin'] + [c for t in s['tasks'] for c in t.get('categories', [t['category']])]:
             names.setdefault(name.lower(), name)
         categories = list(names.values())
         for task in s['tasks']:
-            task['category'] = names[task['category'].lower()]
+            task['categories'] = list(dict.fromkeys(names[c.lower()] for c in task.get('categories', [task['category']])))
+            task['category'] = task['categories'][0]
     require(isinstance(categories, list) and 1 <= len(categories) <= 200)
     require(all(text(c, 40) and c.strip() and c == c.strip() for c in categories))
     require(len({c.lower() for c in categories}) == len(categories))
-    require(all(t['category'] in categories for t in s['tasks']))
+    for task in s['tasks']:
+        assigned = task.get('categories', [task['category']])
+        require(isinstance(assigned, list) and 1 <= len(assigned) <= 200)
+        require(all(isinstance(c, str) and c in categories for c in assigned))
+        require(len(set(assigned)) == len(assigned))
+        task['categories'] = assigned
+        task['category'] = assigned[0]
+    weights = s.get('categoryWeights', {})
+    require(isinstance(weights, dict))
+    require(all(name in categories and type(weight) in [int, float] and math.isfinite(weight) and 0.1 <= weight <= 5 and abs(weight * 10 - round(weight * 10)) < 1e-8 for name, weight in weights.items()))
     result = {key: s.get(key) for key in ['version', 'tasks', 'rewards', 'ledger', 'sessions', 'timer']}
     result['categories'] = categories
+    result['categoryWeights'] = weights
     return result
 
 
@@ -119,7 +134,7 @@ class Store:
     def read(self):
         with self.connect() as db:
             revision, data = db.execute('SELECT revision,data FROM workspace WHERE id=1').fetchone()
-        return dict(revision=revision, state=json.loads(data))
+        return dict(revision=revision, state=validate(json.loads(data)))
 
     def write(self, revision, state):
         state = validate(state)
@@ -201,7 +216,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send(200, value, headers={'ETag': etag})
         elif path == '/server-config.js':
-            self.send(200, b'window.QUEST_SERVER = {enabled: true};\n', 'text/javascript; charset=utf-8')
+            self.send(200, b'window.QUEST_SERVER = {enabled: true, categoryWeights: true};\n', 'text/javascript; charset=utf-8')
         elif path in ASSETS:
             asset = self.server.static_dir / ASSETS[path]
             if not asset.is_file():
@@ -235,6 +250,9 @@ class Handler(BaseHTTPRequestHandler):
             revision = self.headers.get('If-Match', '').strip('"')
             if not revision.isdecimal():
                 self.send(428, dict(error='A current If-Match revision is required.'))
+                return
+            if self.headers.get('X-Quest-Schema') != 'category-weights-v1':
+                self.send(426, dict(error='Reload the updated app before saving multi-category rewards.'))
                 return
             state = json.loads(self.rfile.read(length), parse_constant=lambda value: None)
             result = self.server.store.write(int(revision), state)

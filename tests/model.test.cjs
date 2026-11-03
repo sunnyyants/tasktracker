@@ -78,3 +78,39 @@ test('overdue review excludes completed and deleted tasks and reschedules withou
   const log=old.events.find(e=>e.type==='rescheduled');assert.equal(log.fromDue,'2026-11-01');assert.equal(log.toDue,'2026-11-04');assert.equal(log.fromPriority,'high');assert.equal(log.toPriority,'medium');
   assert.equal(Q.balance(s),10);assert.equal(old.earnedXp,0);assert.deepEqual(Q.validate(s),s);
 });
+const iso=(date,time='09:00:00')=>new Date(date+'T'+time).toISOString();
+function metricTask(s,{title='Report task',due='2026-11-02',category='Work',created='2026-11-01',finished=null,earned=40}={}){
+  const t=add(s,{title,due,category});t.createdAt=iso(created);t.events=[{type:'created',at:t.createdAt}];
+  if(finished){t.status='done';t.completedAt=iso(finished,'10:00:00');t.earnedXp=earned;t.events.push({type:'done',at:t.completedAt});s.ledger.push({id:Q.uid(),type:'task',taskId:t.id,label:t.title,at:t.completedAt,amount:10});}
+  return t;
+}
+test('daily and weekly metrics use first completions, actual XP and completed focus sessions',()=>{
+  const s=Q.initial();const a=metricTask(s,{finished:'2026-11-02',earned:20});
+  a.events.push({type:'queued',at:iso('2026-11-03')},{type:'done',at:iso('2026-11-03','10:00:00')});a.completedAt=iso('2026-11-03','10:00:00');
+  const b=metricTask(s,{due:'2026-11-03',finished:'2026-11-03',earned:60});
+  b.events.splice(1,0,{type:'rescheduled',at:iso('2026-11-02'),fromDue:'2026-11-01',toDue:'2026-11-03'});
+  metricTask(s,{due:'2026-11-02'});metricTask(s,{due:'2026-11-01',finished:'2026-11-01'});
+  metricTask(s,{due:'2026-11-03',finished:'2026-11-03',category:'Design',earned:30});
+  s.sessions=[{id:'focus1',taskId:a.id,title:a.title,seconds:1500,startedAt:iso('2026-11-02'),endedAt:iso('2026-11-02','09:25:00')},{id:'focus2',taskId:b.id,title:b.title,seconds:3000,startedAt:iso('2026-11-03'),endedAt:iso('2026-11-03','09:50:00')}];
+  const m=Q.metrics(s,'2026-11-03','week','Work',new Date('2026-11-03T12:00:00'));
+  assert.equal(m.completed,2);assert.equal(m.onTime,1);assert.equal(m.onTimeRate,50);assert.equal(m.earnedXp,80);assert.equal(m.focusMinutes,75);assert.equal(m.overdue,1);assert.equal(m.partial,true);
+  const daily=Q.metrics(s,'2026-11-03','day','Work',new Date('2026-11-03T12:00:00'));
+  assert.equal(daily.completed,1);assert.equal(daily.earnedXp,60);assert.equal(daily.onTimeRate,0);assert.equal(daily.focusMinutes,50);
+  assert.equal(m.trend.reduce((sum,v)=>sum+v.completed,0),2);assert.equal(m.trend[0].date,'2026-11-02');assert.equal(m.trend[6].date,'2026-11-08');
+});
+test('historical carryover reconstructs the due date, deletion and status at the cutoff',()=>{
+  const s=Q.initial(),t=metricTask(s,{due:'2026-11-10',finished:'2026-11-04'});
+  t.deletedAt=iso('2026-11-06');
+  t.events.push({type:'rescheduled',at:iso('2026-11-05'),fromDue:'2026-11-02',toDue:'2026-11-10'},{type:'deleted',at:t.deletedAt});
+  const past=Q.metrics(s,'2026-11-02','day','',new Date('2026-11-10T12:00:00'));
+  assert.equal(past.overdue,1);assert.equal(past.completed,0);
+  const after=Q.metrics(s,'2026-11-06','day','',new Date('2026-11-10T12:00:00'));assert.equal(after.overdue,0);
+  const finished=Q.metrics(s,'2026-11-04','day','',new Date('2026-11-10T12:00:00'));assert.equal(finished.completed,1);assert.equal(finished.earnedXp,40);
+});
+test('timely replanning remains on time, while future and empty periods have no invented rates',()=>{
+  const s=Q.initial(),t=metricTask(s,{due:'2026-11-03',finished:'2026-11-03',created:'2026-10-30'});
+  t.events.splice(1,0,{type:'rescheduled',at:iso('2026-10-31'),fromDue:'2026-11-01',toDue:'2026-11-03'});
+  const m=Q.metrics(s,'2026-11-03','day','',new Date('2026-11-03T10:00:00'));assert.equal(m.completed,1);assert.equal(m.onTimeRate,100);
+  const future=Q.metrics(s,'2026-11-10','day','',new Date('2026-11-03T12:00:00'));assert.equal(future.future,true);assert.equal(future.onTimeRate,null);assert.equal(future.earnedXp,0);assert.equal(future.overdue,0);
+  const empty=Q.metrics(s,'2026-11-03','day','Missing',new Date('2026-11-03T12:00:00'));assert.equal(empty.completed,0);assert.equal(empty.onTimeRate,null);assert.equal(empty.focusMinutes,0);
+});

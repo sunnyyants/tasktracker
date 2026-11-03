@@ -117,6 +117,47 @@
       return at && new Date(at)>=start && new Date(at)<end && (!f.category||f.category===t.category) && (!f.status||(f.status==='deleted'?!!t.deletedAt:!t.deletedAt&&t.status===f.status)) && (t.title+' '+t.category).toLowerCase().includes((f.query||'').toLowerCase());
     }).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
   }
+  function metrics(s,reference,period='day',category='',asOf=new Date()) {
+    if(!['day','week'].includes(period))throw Error('Choose daily or weekly metrics.');
+    const [start,end]=range(reference,period),cutoff=Math.min(+end,+asOf+1);
+    const rows=s.tasks.filter(t=>!category||t.category===category),byId=new Map(s.tasks.map(t=>[t.id,t]));
+    const credits=new Map();
+    s.ledger.filter(l=>l.type==='task'&&l.taskId).forEach(l=>{if(!credits.has(l.taskId)||+new Date(l.at)<+new Date(credits.get(l.taskId)))credits.set(l.taskId,l.at);});
+    const inPeriod=at=>at&&+new Date(at)>=+start&&+new Date(at)<cutoff;
+    const changes=t=>t.events.filter(e=>e.type==='rescheduled'&&/^\d{4}-\d{2}-\d{2}$/.test(e.fromDue)&&/^\d{4}-\d{2}-\d{2}$/.test(e.toDue)).slice().sort((a,b)=>+new Date(a.at)-+new Date(b.at));
+    // Replay deadline changes. A move made after a deadline cannot turn a late delivery into an on-time one.
+    function deadlineAtCompletion(t,at){
+      const updates=changes(t);let due=updates[0]?.fromDue||t.due;
+      for(const e of updates){if(+new Date(e.at)>+new Date(at))break;if(day(new Date(e.at))>due)break;due=e.toDue;}
+      return due;
+    }
+    function dueAtCutoff(t){let due=t.due;for(const e of changes(t).reverse())if(+new Date(e.at)>=cutoff)due=e.fromDue;return due;}
+    function statusAtCutoff(t){
+      const events=t.events.filter(e=>['queued','progress','done'].includes(e.type)&&+new Date(e.at)<cutoff).slice().sort((a,b)=>+new Date(a.at)-+new Date(b.at));
+      if(events.length)return events.at(-1).type;
+      return t.completedAt&&+new Date(t.completedAt)<cutoff?'done':'queued';
+    }
+    const completions=rows.map(t=>{
+      const first=t.events.filter(e=>e.type==='done').slice().sort((a,b)=>+new Date(a.at)-+new Date(b.at))[0]?.at||credits.get(t.id)||t.completedAt;
+      return {task:t,at:first,xpAt:credits.get(t.id)||first};
+    });
+    const finished=completions.filter(c=>inPeriod(c.at));
+    const onTime=finished.filter(c=>day(new Date(c.at))<=deadlineAtCompletion(c.task,c.at)).length;
+    const earnedXp=completions.filter(c=>inPeriod(c.xpAt)).reduce((sum,c)=>sum+c.task.earnedXp,0);
+    const sessions=s.sessions.filter(t=>inPeriod(t.endedAt)&&(!category||byId.get(t.taskId)?.category===category));
+    const focusMinutes=sessions.reduce((sum,t)=>sum+t.seconds/60,0);
+    const overdueAtCutoff=cutoff<=+start?0:rows.filter(t=>+new Date(t.createdAt)<cutoff&&(!t.deletedAt||+new Date(t.deletedAt)>=cutoff)&&statusAtCutoff(t)!=='done'&&dueAtCutoff(t)<day(new Date(cutoff))).length;
+    // Use calendar arithmetic rather than fixed 24-hour intervals across daylight-saving changes.
+    const chartStart=new Date(start);if(period==='day')chartStart.setDate(chartStart.getDate()-6);
+    const trend=[];
+    for(let i=0;i<7;i++){
+      const from=new Date(chartStart);from.setDate(from.getDate()+i);const to=new Date(from);to.setDate(to.getDate()+1);
+      const activeUntil=Math.min(+to,+asOf+1);
+      const done=completions.filter(c=>c.at&&+new Date(c.at)>=+from&&+new Date(c.at)<activeUntil);
+      trend.push({date:day(from),completed:done.length,future:+from>+asOf});
+    }
+    return {start:day(start),end:day(new Date(+end-1)),partial:+start<=+asOf&&+end>+asOf,future:+start>+asOf,completed:finished.length,onTime,onTimeRate:finished.length?Math.round(onTime/finished.length*100):null,earnedXp,focusMinutes,sessionCount:sessions.length,overdue:overdueAtCutoff,trend};
+  }
   function startTimer(s,taskId,minutes) {
     if(s.timer) throw Error('Reset the current session first.');
     const t=s.tasks.find(t=>t.id===taskId&&!t.deletedAt&&t.status!=='done');
@@ -151,5 +192,5 @@
     if(!Array.isArray(result.categories)||!result.categories.length||result.categories.length>200||result.categories.some(c=>!str(c,40)||!c.trim()||c!==c.trim())||new Set(result.categories.map(c=>c.toLowerCase())).size!==result.categories.length||result.tasks.some(t=>!result.categories.includes(t.category)))fail();
     return result;
   }
-  scope.Quest={uid,now,day,xpFor,effortFactors,initial,balance,xp,saveCategory,deleteCategory,task,status,remove,reward,redeem,range,overdue,reschedule,history,startTimer,remaining,finishTimer,toggleTimer,validate};
+  scope.Quest={uid,now,day,xpFor,effortFactors,initial,balance,xp,saveCategory,deleteCategory,task,status,remove,reward,redeem,range,overdue,reschedule,history,metrics,startTimer,remaining,finishTimer,toggleTimer,validate};
 })(typeof module!=='undefined'?module.exports:globalThis);

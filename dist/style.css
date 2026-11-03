@@ -3,6 +3,24 @@
 @media(min-width:1450px){#task-list.board{grid-template-columns:repeat(3,minmax(0,1fr))}.reward-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:1120px){.shell{grid-template-columns:190px minmax(0,1fr)}aside{padding:24px 14px}main{padding:26px 22px}#task-list.board{grid-template-columns:1fr}.board .task-card{align-items:center}.board .task-main{flex-basis:0}.board .task-actions{width:auto;margin:0}.expand-tools{margin-left:0}.brand{font-size:18px}}
 @media(max-width:700px){.shell{grid-template-columns:1fr}aside{padding:18px;border-right:0;border-bottom:1px solid var(--line);gap:5px}aside>.eyebrow,.operator,.storage-label{display:none}nav{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 0}nav a{font-size:11px;padding:8px}nav a svg{width:14px;height:14px}.brand{font-size:21px}main{padding:22px 16px}h1{font-size:26px}.page-header{gap:15px}.reward-grid{grid-template-columns:1fr}.reward-panel{padding:14px}.reward-card{gap:8px}.task-filters{grid-template-columns:1fr 1fr}.task-filters>.search-label{grid-column:1/-1}.emblem{display:none}.timer-body{flex-wrap:wrap;gap:14px}.timer-fields{flex-basis:100%}#clock{font-size:40px}.history-filters{grid-template-columns:1fr 1fr}.task-card,.board .task-card{flex-wrap:wrap}.task-main,.board .task-main{flex-basis:calc(100% - 30px)}.task-actions,.board .task-actions{width:100%;justify-content:space-between;margin-left:25px}.view-tools{gap:10px}.form-grid{grid-template-columns:1fr}input,select{font-size:16px}button{min-height:38px}.reward-card .reward-tools button{min-height:30px}.daily{padding:16px}footer{font-size:9px}}
+.metrics-filters{display:flex;align-items:end;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+.metrics-filters>label{flex:1;min-width:140px}
+.metrics-filters>.category-actions{padding-bottom:1px}
+.metrics-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0 28px}
+.metric-card{padding:18px;background:var(--panel);border:1px solid var(--line);border-top:2px solid #396d75;border-radius:5px;min-width:0}
+.metric-card h2{font-size:12px;color:var(--muted);margin-bottom:12px}
+.metric-card>strong{display:block;font-size:32px;color:var(--cyan);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.metric-card>p{font-size:11px;margin:8px 0 0}
+.metrics-trend{padding:20px;background:var(--panel);border:1px solid var(--line);border-radius:5px}
+.metrics-trend>.between{margin-bottom:20px}
+.metrics-bar{display:grid;grid-template-columns:85px minmax(0,1fr) 35px;align-items:center;gap:12px;margin:14px 0;font-size:12px}
+.metrics-bar>span:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.metrics-bar.is-future{color:var(--muted)}
+.metrics-method{margin:24px 0;font-size:12px;color:var(--muted)}
+.metrics-method summary{color:var(--cyan);cursor:pointer}
+.metrics-method ul{padding-left:20px}.metrics-method li{margin:10px 0}
+@media(max-width:900px){.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:480px){.metrics-grid{grid-template-columns:1fr}.metrics-bar{grid-template-columns:70px minmax(0,1fr) 25px;gap:8px}.metrics-trend{padding:14px}}
 .overdue-banner{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap;border:1px solid #a46c3e;border-left:4px solid #ffb66b;background:#30241e;padding:18px;border-radius:5px;margin:22px 0;color:#ffd5a6}
 .overdue-banner p{font-size:12px;margin:6px 0 0;color:#e0c4a7}
 .task-card.is-overdue{border-left:3px solid #ffb66b;background:#1d1d2b}

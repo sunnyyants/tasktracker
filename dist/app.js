@@ -75,8 +75,8 @@
     const xp=Q.xp(state),level=Math.floor(xp/200)+1;
     $('#balance').textContent=Q.balance(state);$('#level').textContent=String(level).padStart(2,'0');$('#xp-label').textContent=`LEVEL ${level} · ${xp%200} / 200 XP`;$('#xp').value=xp%200;
     $('#today-label').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}).toUpperCase();
-    selectCategories('#task-category');selectCategories('#history-category');renderCategories();
-    renderRewards();renderTasks();renderHistory();renderTimer();renderOverdue();
+    selectCategories('#task-category');selectCategories('#history-category');selectCategories('#metrics-category');renderCategories();
+    renderRewards();renderTasks();renderHistory();renderTimer();renderOverdue();renderMetrics();
     $('#data-stats').textContent=`${state.tasks.length} tasks · ${state.rewards.length} rewards · ${state.sessions.length} focus sessions · ${state.ledger.length} credit transactions`;
     $('#export').disabled=shared&&revision===null;
   }
@@ -143,6 +143,29 @@
     $('.timer-panel').classList.toggle('folded',!!prefs.timerFolded);$('#timer-fold').textContent=prefs.timerFolded?'Expand timer':'Collapse timer';$('#timer-fold').setAttribute('aria-expanded',String(!prefs.timerFolded));
     tickClock();
   }
+  function renderMetrics(){
+    const date=$('#metrics-date').value||Q.day(),period=$('#metrics-period').value;
+    const m=Q.metrics(state,date,period,$('#metrics-category').value);
+    const label=d=>new Date(d+'T12:00:00').toLocaleDateString(undefined,{month:'short',day:'numeric'});
+    $('#metrics-range').textContent=`${label(m.start)} – ${label(m.end)} · ${m.future?'Upcoming period':m.partial?'So far':'Completed period'} · Local time`;
+    $('#metric-completed').textContent=m.completed;
+    $('#metric-ontime').textContent=m.onTimeRate===null?'—':m.onTimeRate+'%';
+    $('#metric-ontime-detail').textContent=m.completed?`${m.onTime} of ${m.completed} completed on time`:'No first completions in this period';
+    $('#metric-xp').textContent=m.earnedXp;
+    $('#metric-focus').textContent=m.focusMinutes.toLocaleString(undefined,{maximumFractionDigits:1});
+    $('#metric-focus-detail').textContent=`${m.sessionCount} completed focus session${m.sessionCount===1?'':'s'}`;
+    $('#metric-overdue').textContent=m.overdue;
+    $('#metric-overdue-detail').textContent=m.future?'No actual carryover yet':m.partial?'Overdue and unfinished right now':'Overdue and unfinished at period end';
+    $('#metrics-trend-title').textContent=period==='week'?'Daily output this week':'Daily output · trailing 7 days';
+    const max=Math.max(1,...m.trend.map(v=>v.completed));
+    $('#metrics-trend').innerHTML=m.trend.map(v=>`<div class="metrics-bar ${v.future?'is-future':''}"><span>${label(v.date)}</span><progress max="${max}" value="${v.completed}" aria-label="${esc(v.date)}: ${v.completed} first completions"></progress><span>${v.future?'—':v.completed}</span></div>`).join('');
+    $('#metrics-trend').setAttribute('aria-label',m.trend.map(v=>`${v.date}: ${v.future?'future':v.completed+' tasks'}`).join('; '));
+  }
+  $$('.metrics-filters input,.metrics-filters select').forEach(el=>el.addEventListener('input',()=>{if($('#metrics-date').value&&$('#metrics-date').checkValidity())renderMetrics();}));
+  $('#metrics-date').value=Q.day();
+  $('#metrics-current').onclick=()=>{$('#metrics-date').value=Q.day();renderMetrics();};
+  function moveMetrics(direction){const date=new Date(($('#metrics-date').value||Q.day())+'T12:00:00');date.setDate(date.getDate()+direction*($('#metrics-period').value==='week'?7:1));$('#metrics-date').value=Q.day(date);renderMetrics();}
+  $('#metrics-prev').onclick=()=>moveMetrics(-1);$('#metrics-next').onclick=()=>moveMetrics(1);
   function tickClock(){const left=state.timer?Q.remaining(state):selectedMinutes*60;$('#clock').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');}
   function openTask(id){
     const t=state.tasks.find(t=>t.id===id);$('#task-form').reset();$('#task-id').value=t?.id||'';$('#task-form-title').textContent=t?'Edit mission':'New mission';$('#task-title').value=t?.title||'';$('#task-category-input').value=t?.category||state.categories[0];$('#task-priority').value=t?.priority||'medium';$('#task-effort').value=t?.effort||'medium';$('#task-due').value=t?.due||Q.day();renderXpPreview();$('#task-dialog').showModal();
@@ -155,9 +178,9 @@
   $('#category-list').addEventListener('submit',async e=>{
     e.preventDefault();const form=e.target,previous=form.dataset.renameCategory;
     const name=form.elements.categoryName.value.trim();
-    const selected=['#task-category','#history-category','#task-category-input'].filter(id=>$(id).value===previous);
+    const selected=['#task-category','#history-category','#metrics-category','#task-category-input'].filter(id=>$(id).value===previous);
     if(await change(()=>Q.saveCategory(state,name,previous),'Category updated.')){
-      selected.forEach(id=>$(id).value=name);renderTasks();renderHistory();
+      selected.forEach(id=>$(id).value=name);renderTasks();renderHistory();renderMetrics();
     }
   });
   $('#category-delete-form').onsubmit=async e=>{
@@ -216,8 +239,8 @@
   };
   $('#timer-reset').onclick=()=>confirmation('Reset this focus session?','The current session will be discarded. Completed sessions stay in history.',()=>change(()=>{state.timer=null;},'Timer reset.'));
   $('#timer-fold').onclick=()=>{prefs.timerFolded=!prefs.timerFolded;preferences();renderTimer();};
-  setInterval(()=>{if(!saving&&state.timer?.deadline&&Q.remaining(state)===0){change(()=>Q.finishTimer(state),'Focus session complete. Take a break!');}else tickClock();if($('#today-label').dataset.date!==Q.day()){$('#today-label').dataset.date=Q.day();renderTasks();renderOverdue();}},1000);
-  function route(){currentPage=['missions','history','rewards','data'].includes(location.hash.slice(1))?location.hash.slice(1):'missions';$$('.page').forEach(p=>p.hidden=p.id!==currentPage+'-page');$$('nav a').forEach(a=>{if(a.dataset.page===currentPage)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});const titles={missions:['Your next objective.','Lock in. Clear your missions. Upgrade your day.'],history:['Your mission archive.','Every step forward leaves a trace.'],rewards:['Work hard. Recharge well.','Build a reward system that works for you.'],data:['Take your progress anywhere.','Simple files. Your data. No lock-in.']};$('#page-title').textContent=titles[currentPage][0];$('#page-subtitle').textContent=titles[currentPage][1];}
+  setInterval(()=>{if(!saving&&state.timer?.deadline&&Q.remaining(state)===0){change(()=>Q.finishTimer(state),'Focus session complete. Take a break!');}else tickClock();if($('#today-label').dataset.date!==Q.day()){$('#today-label').dataset.date=Q.day();renderTasks();renderOverdue();renderMetrics();}},1000);
+  function route(){currentPage=['missions','history','metrics','rewards','data'].includes(location.hash.slice(1))?location.hash.slice(1):'missions';$$('.page').forEach(p=>p.hidden=p.id!==currentPage+'-page');$$('nav a').forEach(a=>{if(a.dataset.page===currentPage)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});const titles={metrics:['Your progress, measured.','Review your daily output, focus and delivery.'],missions:['Your next objective.','Lock in. Clear your missions. Upgrade your day.'],history:['Your mission archive.','Every step forward leaves a trace.'],rewards:['Work hard. Recharge well.','Build a reward system that works for you.'],data:['Take your progress anywhere.','Simple files. Your data. No lock-in.']};$('#page-title').textContent=titles[currentPage][0];$('#page-subtitle').textContent=titles[currentPage][1];if(currentPage==='metrics')renderMetrics();}
   window.addEventListener('hashchange',route);
   window.addEventListener('storage',e=>{if(shared||e.key!==KEY)return;try{if(!e.newValue)throw Error('Saved data was removed in another tab.');state=Q.validate(JSON.parse(e.newValue));storedRaw=e.newValue;render();notify('Updated from another tab.');}catch{notify('Data changed in another tab. Reload before editing.');}});
   $('#export').onclick=()=>{const blob=new Blob([JSON.stringify({...state,exportedAt:Q.now()},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='quest-os-backup-'+Q.day()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notify('Backup exported. Keep it somewhere safe.');};

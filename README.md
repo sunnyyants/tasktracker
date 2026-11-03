@@ -29,6 +29,18 @@ Choose **Categories** beside **New mission**, or **Manage categories** in the ta
 
 Renaming/reassigning updates active, completed and deleted task records; no tasks, XP, credits or completion dates are removed. Changes are recorded in task activity history. Task/history filters and the task editor use the saved category list. Existing v1 backups/databases are upgraded automatically when loaded/saved. For this upgrade, replace **both `server.py` and `dist/`**, restart the server, and reload all connected browsers.
 
+## Daily and weekly efficiency metrics
+
+Open **Efficiency metrics** in the sidebar. Select Daily or Weekly, a reference date, and an optional category. Previous/next and Current period navigate the report. The dashboard shows:
+
+- First task completions: each task counts once, even if reopened; later deletion preserves historical output.
+- On-time rate: on-time first completions divided by all first completions in the period. With no completions, the rate is a dash. Timely deadline changes are respected; rescheduling after a missed due day does not retrospectively make it on time.
+- XP earned: actual XP attributed to its original award timestamp, rather than the latest completion timestamp or current task estimate. Spending reward credits does not reduce XP output.
+- Focus minutes: durations of completed focus sessions; incomplete/reset sessions, estimates, and browser-open time are excluded.
+- Overdue carryover: unfinished, non-deleted overdue tasks at a historical period's end, or now for the current period. Task status and due-date changes are replayed from available activity history.
+
+The seven-day output chart shows first completions per day. Weekly reports run Monday–Sunday; daily reports show a trailing seven-day chart. Current periods are labeled “So far.” Dates follow the viewing machine's local timezone; use the same timezone across devices for identical day boundaries. Filters use current category assignments. Legacy records without detailed activity history use their stored values as a fallback. Metrics are derived from existing records and do not require a database migration. No late-reward penalty is enabled by this feature.
+
 ## Mac mini: one shared SQLite workspace
 
 Copy this entire folder to the **Mac mini**, not just `dist/`. Python 3.9+ is required. Stop the old web server with Ctrl+C in its Terminal first, then open Terminal in this folder:

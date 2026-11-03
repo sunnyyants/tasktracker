@@ -4,6 +4,10 @@
 @media(max-width:1120px){.shell{grid-template-columns:190px minmax(0,1fr)}aside{padding:24px 14px}main{padding:26px 22px}#task-list.board{grid-template-columns:1fr}.board .task-card{align-items:center}.board .task-main{flex-basis:0}.board .task-actions{width:auto;margin:0}.expand-tools{margin-left:0}.brand{font-size:18px}}
 @media(max-width:700px){.shell{grid-template-columns:1fr}aside{padding:18px;border-right:0;border-bottom:1px solid var(--line);gap:5px}aside>.eyebrow,.operator,.storage-label{display:none}nav{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 0}nav a{font-size:11px;padding:8px}nav a svg{width:14px;height:14px}.brand{font-size:21px}main{padding:22px 16px}h1{font-size:26px}.page-header{gap:15px}.reward-grid{grid-template-columns:1fr}.reward-panel{padding:14px}.reward-card{gap:8px}.task-filters{grid-template-columns:1fr 1fr}.task-filters>.search-label{grid-column:1/-1}.emblem{display:none}.timer-body{flex-wrap:wrap;gap:14px}.timer-fields{flex-basis:100%}#clock{font-size:40px}.history-filters{grid-template-columns:1fr 1fr}.task-card,.board .task-card{flex-wrap:wrap}.task-main,.board .task-main{flex-basis:calc(100% - 30px)}.task-actions,.board .task-actions{width:100%;justify-content:space-between;margin-left:25px}.view-tools{gap:10px}.form-grid{grid-template-columns:1fr}input,select{font-size:16px}button{min-height:38px}.reward-card .reward-tools button{min-height:30px}.daily{padding:16px}footer{font-size:9px}}
 .metrics-filters{display:flex;align-items:end;flex-wrap:wrap;gap:12px;margin-bottom:18px}
+.reward-panel>[id$="-reward-content"]>.small{margin-bottom:0}
+.task-pagination{display:flex;justify-content:center;align-items:center;gap:10px;flex-wrap:wrap;margin-top:18px}
+.sort-help{font-size:12px;color:var(--muted);margin:10px 0 18px}.sort-help summary{color:var(--cyan);cursor:pointer}.sort-help p{margin:10px 0}
+.roi-estimate{color:#a7dcd5}
 .metrics-filters>label{flex:1;min-width:140px}
 .metrics-filters>.category-actions{padding-bottom:1px}
 .metrics-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:18px 0 28px}

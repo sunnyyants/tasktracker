@@ -117,3 +117,16 @@ test('timely replanning remains on time, while future and empty periods have no 
   const empty=Q.metrics(s,'2026-11-03','day','Missing',new Date('2026-11-03T12:00:00'));assert.equal(empty.completed,0);assert.equal(empty.onTimeRate,null);assert.equal(empty.focusMinutes,0);
   assert.ok(empty.trend.every(v=>v.earnedXp===0&&v.focusMinutes===0&&v.completed===0));
 });
+test('recommended ROI sorting protects priority and overdue work before reward efficiency',()=>{
+  const s=Q.initial();
+  const lowQuick=add(s,{title:'Low quick',priority:'low',effort:'small',due:'2026-11-04'});
+  const highLarge=add(s,{title:'High large',priority:'high',effort:'epic',due:'2026-11-04'});
+  const highQuick=add(s,{title:'High quick',priority:'high',effort:'small',due:'2026-11-04'});
+  const highLate=add(s,{title:'High overdue',priority:'high',effort:'epic',due:'2026-11-02'});
+  assert.ok(Q.roiFor(lowQuick)>Q.roiFor(highLarge));
+  assert.deepEqual(Q.sortTasks(s.tasks,'roi','2026-11-03').map(t=>t.title),['High overdue','High quick','High large','Low quick']);
+  assert.equal(Q.roiFor(highQuick),80);assert.equal(Q.sortTasks(s.tasks,'due')[0].id,highLate.id);
+  assert.equal(s.tasks[0].id,lowQuick.id);
+  Q.status(s,highQuick.id,'done');Q.status(s,highQuick.id,'queued');assert.equal(Q.roiFor(highQuick),0);
+  assert.equal(Q.sortTasks(s.tasks,'roi','2026-11-03').at(-2).id,highQuick.id);
+});

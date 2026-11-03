@@ -13,7 +13,8 @@
   }
   let revision=null, saving=false, polling=false;
   let state, raw, storageBlocked=false, toastTimeout, selectedMinutes=25, currentPage='missions', historyPage=0, confirmAction;
-  let prefs={layout:'board',group:'status',compact:false,collapsed:{},timerFolded:false};
+  let taskLimit=5;
+  let prefs={layout:'board',group:'status',sort:'roi',compact:false,collapsed:{},timerFolded:false,rewardCollapsed:{quick:false,all:false}};
   if(shared){
     state=Q.initial();storageBlocked=true;
     try{const response=await request('api/state',{cache:'no-store'});if(!response.ok)throw Error('Server unavailable');const data=await response.json();state=Q.validate(data.state);revision=data.revision;storageBlocked=false;}catch{$('#storage-error').hidden=false;$('#storage-error').textContent='Cannot reach the shared database. Check that server.py is running; reconnect to continue. Local browser data has not been changed.';}
@@ -21,6 +22,7 @@
     try{raw=localStorage.getItem(KEY);state=raw?Q.validate(JSON.parse(raw)):Q.initial();}catch(e){state=Q.initial();storageBlocked=true;$('#storage-error').hidden=false;$('#storage-error').textContent='Saved data could not be read. Changes are blocked to protect it. Export available data or try this browser’s normal mode.';}
   }
   try{const p=JSON.parse(localStorage.getItem(VIEW)||'null');if(p&&['board','list'].includes(p.layout)&&['status','category','priority'].includes(p.group))prefs={...prefs,...p};}catch{}
+  if(!['roi','priority','due'].includes(prefs.sort))prefs.sort='roi';
   let storedRaw=raw||null;
   function notify(text){$('#toast').textContent=text;$('#toast').hidden=false;clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>$('#toast').hidden=true,5000);}
   function preferences(){try{localStorage.setItem(VIEW,JSON.stringify(prefs));}catch{} }
@@ -112,31 +114,37 @@
     return `<article class="reward-card"><div class="reward-title"><span class="reward-icon">${icon(glyph)}</span><h3>${esc(r.name)}</h3></div><p>${r.cost} credits${r.minutes?' · '+r.minutes+' min':''}</p><button class="redeem" data-redeem="${esc(r.id)}" ${cost<r.cost?'disabled':''}>${cost<r.cost?'Need '+(r.cost-cost)+' more credits':'Redeem'}</button>${tools?`<div class="reward-tools"><button class="icon-button" data-edit-reward="${esc(r.id)}" aria-label="Edit ${esc(r.name)}">${icon('edit')}</button><button class="icon-button danger" data-delete-reward="${esc(r.id)}" aria-label="Delete ${esc(r.name)}">${icon('trash')}</button></div>`:''}</article>`;
   }
   function renderRewards(){
-    const head=`<div class="between"><div><span class="eyebrow">${icon('gift')} REWARD EXCHANGE</span><p>Complete missions → earn credits → redeem a break.</p></div><button data-action="add-reward">${icon('plus')}New reward</button></div>`;
-    $('#quick-rewards').innerHTML=head+`<div class="reward-grid">${state.rewards.slice(-3).reverse().map(r=>rewardCard(r,false)).join('')||'<p>Add a reward to work toward.</p>'}</div><p class="small">10 credits per mission · ${Q.balance(state)} available · <a href="#rewards">All rewards & redemption history →</a></p>`;
-    $('#all-rewards').innerHTML=head+`<div class="reward-grid">${state.rewards.map(r=>rewardCard(r,true)).join('')||'<p>No rewards yet. Create your first one.</p>'}</div>`;
+    const head=which=>{const collapsed=!!prefs.rewardCollapsed?.[which];return `<div class="between"><div><span class="eyebrow">${icon('gift')} REWARD EXCHANGE</span><p>${collapsed?state.rewards.length+' rewards · '+Q.balance(state)+' credits available':'Complete missions → earn credits → redeem a break.'}</p></div><div class="category-actions"><button data-action="add-reward">${icon('plus')}New reward</button><button data-toggle-rewards="${which}" aria-controls="${which}-reward-content" aria-expanded="${!collapsed}">${collapsed?'▸ Expand rewards':'▾ Collapse rewards'}</button></div></div>`;};
+    $('#quick-rewards').innerHTML=head('quick')+`<div id="quick-reward-content" ${prefs.rewardCollapsed?.quick?'hidden':''}><div class="reward-grid">${state.rewards.slice(-3).reverse().map(r=>rewardCard(r,false)).join('')||'<p>Add a reward to work toward.</p>'}</div><p class="small">10 credits per mission · ${Q.balance(state)} available · <a href="#rewards">All rewards & redemption history →</a></p></div>`;
+    $('#all-rewards').innerHTML=head('all')+`<div id="all-reward-content" ${prefs.rewardCollapsed?.all?'hidden':''}><div class="reward-grid">${state.rewards.map(r=>rewardCard(r,true)).join('')||'<p>No rewards yet. Create your first one.</p>'}</div></div>`;
     const receipts=state.ledger.filter(l=>l.type==='reward').slice().reverse();
     $('#redemptions').innerHTML=receipts.map(r=>`<div class="list-line"><div><strong>${esc(r.label)}</strong><p>${stamp(r.at)}${r.minutes?' · '+r.minutes+' min break':''}</p></div><span>${r.amount} credits</span></div>`).join('')||'<p class="small">No rewards redeemed yet.</p>';
   }
   const effortLabel={small:'Small',medium:'Medium',large:'Large',epic:'Major'};
   const statusLabel={queued:'Queued',progress:'In progress',done:'Completed'};
   function taskCard(t){
-    return `<article class="task-card ${t.status==='done'?'done':''} ${t.due<Q.day()&&t.status!=='done'?'is-overdue':''}"><input type="checkbox" data-complete="${esc(t.id)}" aria-label="Complete ${esc(t.title)}" ${t.status==='done'?'checked':''}><div class="task-main"><strong>${esc(t.title)}</strong>${t.due<Q.day()&&t.status!=='done'?'<span class="overdue-tag">OVERDUE</span>':''}<div class="task-meta"><span>${icon('tag')} ${esc(t.category)}</span><span>${esc(effortLabel[t.effort])} effort</span><span class="priority ${t.priority}">${t.priority==='high'?'↑↑':t.priority==='medium'?'↑':'↓'} ${t.priority}</span><span class="${t.due<Q.day()&&t.status!=='done'?'overdue':''}">${esc(t.due)}${t.due<Q.day()&&t.status!=='done'?' · OVERDUE':''}</span><span class="xp-reward">${t.earnedXp?'✓ '+t.earnedXp:'+'+Q.xpFor(t.priority,t.effort)} XP</span></div></div><div class="task-actions"><select class="task-status" data-status="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v}</option>`).join('')}</select><div class="task-tools">${t.status!=='done'?`<button data-focus="${esc(t.id)}" aria-label="Focus on ${esc(t.title)}">${icon('timer')}</button>`:''}<button data-edit-task="${esc(t.id)}" aria-label="Edit ${esc(t.title)}">${icon('edit')}</button><button data-delete-task="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">${icon('trash')}</button></div></div></article>`;
+    return `<article class="task-card ${t.status==='done'?'done':''} ${t.due<Q.day()&&t.status!=='done'?'is-overdue':''}"><input type="checkbox" data-complete="${esc(t.id)}" aria-label="Complete ${esc(t.title)}" ${t.status==='done'?'checked':''}><div class="task-main"><strong>${esc(t.title)}</strong>${t.due<Q.day()&&t.status!=='done'?'<span class="overdue-tag">OVERDUE</span>':''}<div class="task-meta"><span>${icon('tag')} ${esc(t.category)}</span><span>${esc(effortLabel[t.effort])} effort</span><span class="roi-estimate" title="Estimated available XP per hour, based on effort">${t.earnedXp?'Already rewarded':'≈'+Q.roiFor(t).toLocaleString(undefined,{maximumFractionDigits:1})+' XP/h'}</span><span class="priority ${t.priority}">${t.priority==='high'?'↑↑':t.priority==='medium'?'↑':'↓'} ${t.priority}</span><span class="${t.due<Q.day()&&t.status!=='done'?'overdue':''}">${esc(t.due)}${t.due<Q.day()&&t.status!=='done'?' · OVERDUE':''}</span><span class="xp-reward">${t.earnedXp?'✓ '+t.earnedXp:'+'+Q.xpFor(t.priority,t.effort)} XP</span></div></div><div class="task-actions"><select class="task-status" data-status="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v}</option>`).join('')}</select><div class="task-tools">${t.status!=='done'?`<button data-focus="${esc(t.id)}" aria-label="Focus on ${esc(t.title)}">${icon('timer')}</button>`:''}<button data-edit-task="${esc(t.id)}" aria-label="Edit ${esc(t.title)}">${icon('edit')}</button><button data-delete-task="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">${icon('trash')}</button></div></div></article>`;
   }
   function renderTasks(){
     const today=Q.day(),scope=$('#task-scope').value,query=$('#task-search').value.toLowerCase(),cat=$('#task-category').value;
     const daily=state.tasks.filter(t=>!t.deletedAt&&t.due===today),done=daily.filter(t=>t.status==='done').length;
     const results=Q.metrics(state,today,'day');
     $('#daily-completed').textContent=results.completed;$('#daily-xp').textContent=results.earnedXp;$('#daily-focus').textContent=results.focusMinutes.toLocaleString(undefined,{maximumFractionDigits:1});
-    $('#daily-label').textContent=daily.length?`${done} of ${daily.length} missions due today cleared · ${results.completed} first completions today`:'A clear runway. Add a mission to start earning XP.';
+    $('#daily-label').textContent=daily.length?`${done} of ${daily.length} missions due today cleared · ${results.completed} first completions today`:`No missions due today · ${results.completed} first completion${results.completed===1?'':'s'} today`;
     $('#daily-progress').max=daily.length||1;$('#daily-progress').value=done;
     let rows=state.tasks.filter(t=>!t.deletedAt&&(scope==='done'?t.status==='done':t.status!=='done')&&(scope!=='today'||t.due===today)&&(scope!=='overdue'||t.due<today)&&(!cat||cat===t.category)&&(t.title+' '+t.category).toLowerCase().includes(query));
-    const rank={high:0,medium:1,low:2};rows.sort((a,b)=>rank[a.priority]-rank[b.priority]||a.due.localeCompare(b.due)||a.createdAt.localeCompare(b.createdAt));
-    $('#task-count').textContent=`${rows.length} shown`;
+    rows=Q.sortTasks(rows,prefs.sort,today);
+    const shown=prefs.layout==='list'?rows.slice(0,taskLimit):rows;
+    $('#task-count').textContent=`${shown.length} of ${rows.length} matching`;
+    const groupFor=t=>prefs.group==='status'?statusLabel[t.status]:prefs.group==='priority'?t.priority[0].toUpperCase()+t.priority.slice(1)+' priority':t.category;
+    const totals=new Map();rows.forEach(t=>totals.set(groupFor(t),(totals.get(groupFor(t))||0)+1));
     const groups=new Map();
-    rows.forEach(t=>{const k=prefs.group==='status'?statusLabel[t.status]:prefs.group==='priority'?t.priority[0].toUpperCase()+t.priority.slice(1)+' priority':t.category;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(t);});
+    shown.forEach(t=>{const k=groupFor(t);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(t);});
     $('#task-list').className=(prefs.layout==='board'?'board':'list')+(prefs.compact?' compact':'');
-    $('#task-list').innerHTML=[...groups].map(([name,items])=>`<details class="group" data-group="${esc(prefs.group+':'+name)}" ${prefs.collapsed[prefs.group+':'+name]?'':'open'}><summary>${esc(name)}<span class="group-count">${items.length}</span></summary>${items.map(taskCard).join('')}</details>`).join('')||`<div class="empty"><h3>${state.tasks.length?'No matching missions.':'Your first mission starts here.'}</h3><p>${state.tasks.length?'Try another scope, category or search.':'Add a task, choose its priority and earn 10 credits on first completion.'}</p><button class="primary" data-action="add-task">${icon('plus')}New mission</button></div>`;
+    $('#task-list').innerHTML=[...groups].map(([name,items])=>`<details class="group" data-group="${esc(prefs.group+':'+name)}" ${prefs.collapsed[prefs.group+':'+name]?'':'open'}><summary>${esc(name)}<span class="group-count">${items.length<totals.get(name)?items.length+' of '+totals.get(name):items.length}</span></summary>${items.map(taskCard).join('')}</details>`).join('')||`<div class="empty"><h3>${state.tasks.length?'No matching missions.':'Your first mission starts here.'}</h3><p>${state.tasks.length?'Try another scope, category or search.':'Add a task, choose its priority and earn 10 credits on first completion.'}</p><button class="primary" data-action="add-task">${icon('plus')}New mission</button></div>`;
+    $('#task-pagination').hidden=prefs.layout!=='list'||rows.length<=5;
+    $('#task-more').hidden=shown.length>=rows.length;$('#task-more').textContent=`Show ${Math.min(5,rows.length-shown.length)} more · ${rows.length-shown.length} remaining`;
+    $('#task-less').hidden=taskLimit<=5;$('#task-sort').value=prefs.sort;$('#roi-help').hidden=prefs.sort!=='roi';
     $$('#task-list details').forEach(d=>d.addEventListener('toggle',()=>{prefs.collapsed[d.dataset.group]=!d.open;preferences();}));
     $$('[data-layout]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.layout===prefs.layout)));$('#group-by').value=prefs.group;$('#compact').checked=prefs.compact;
   }
@@ -146,7 +154,7 @@
     const next=new Date();next.setDate(next.getDate()+1);
     $('#overdue-list').innerHTML=tasks.map(t=>`<form class="overdue-row" data-reschedule="${esc(t.id)}"><h3>${esc(t.title)}</h3><p class="small">Was due ${esc(t.due)} · ${esc(t.category)} · ${effortLabel[t.effort]} effort</p><div class="form-grid"><label>New priority<select name="priority">${['low','medium','high'].map(p=>`<option value="${p}" ${p===t.priority?'selected':''}>${p} · ${Q.xpFor(p,t.effort)} XP${t.earnedXp?' estimate (already rewarded)':''}</option>`).join('')}</select></label><label>New due date<input name="due" type="date" min="${Q.day()}" value="${Q.day()}" required></label></div><div class="actions"><button type="button" data-due-preset="${Q.day()}">Today</button><button type="button" data-due-preset="${Q.day(next)}">Tomorrow</button><button type="submit" class="primary">Save new plan</button></div></form>`).join('')||'<p class="empty">All caught up. No overdue missions remain.</p>';
   }
-  $('#overdue-filter').onclick=()=>{$('#task-scope').value='overdue';$('#task-search').value='';$('#task-category').value='';renderTasks();$('#task-list').scrollIntoView({behavior:'smooth',block:'start'});};
+  $('#overdue-filter').onclick=()=>{$('#task-scope').value='overdue';$('#task-search').value='';$('#task-category').value='';taskLimit=5;renderTasks();$('#task-list').scrollIntoView({behavior:'smooth',block:'start'});};
   $('#overdue-list').addEventListener('submit',async e=>{e.preventDefault();const form=e.target;await change(()=>Q.reschedule(state,form.dataset.reschedule,form.elements.due.value,form.elements.priority.value),'Task rescheduled. Previous due date kept in history.');});
   function historyFilters(){return {date:$('#history-date').value||Q.day(),period:$('#history-period').value,basis:$('#history-basis').value,category:$('#history-category').value,status:$('#history-status').value,query:$('#history-search').value};}
   function renderHistory(){
@@ -237,6 +245,7 @@
     const b=e.target.closest('button');if(!b||b.disabled)return;
     if(b.dataset.action==='add-task')openTask();
     if(b.dataset.action==='add-reward')openReward();
+    if(b.dataset.toggleRewards){const key=b.dataset.toggleRewards;prefs.rewardCollapsed={...prefs.rewardCollapsed,[key]:!prefs.rewardCollapsed?.[key]};preferences();renderRewards();$(`[data-toggle-rewards="${key}"]`).focus();}
     if(b.dataset.action==='review-overdue'){renderOverdue();$('#overdue-dialog').showModal();}
     if(b.dataset.duePreset)b.closest('form').elements.due.value=b.dataset.duePreset;
     if(b.dataset.action==='manage-categories'){renderCategories();$('#category-dialog').showModal();}
@@ -254,7 +263,7 @@
     if(b.dataset.deleteReward)confirmation('Remove this reward?','Past redemptions stay in your history.',()=>change(()=>{state.rewards=state.rewards.filter(r=>r.id!==b.dataset.deleteReward);},'Reward removed.'));
     if(b.dataset.redeem){const r=state.rewards.find(r=>r.id===b.dataset.redeem);confirmation('Redeem '+r.name+'?',`Spend ${r.cost} credits? Your balance will be ${Q.balance(state)-r.cost}.`,()=>change(()=>Q.redeem(state,r.id),'Reward redeemed. Enjoy your break!'));}
     if(b.dataset.focus){if(state.timer){notify('Finish or reset your current focus session first.');return;}$('#timer-task').value=b.dataset.focus;$('.timer-panel').scrollIntoView({behavior:'smooth',block:'center'});$('#timer-start').focus();}
-    if(b.dataset.layout){prefs.layout=b.dataset.layout;preferences();renderTasks();}
+    if(b.dataset.layout){prefs.layout=b.dataset.layout;taskLimit=5;preferences();renderTasks();}
     if(b.dataset.minutes){selectedMinutes=Number(b.dataset.minutes);$('#timer-minutes').value=selectedMinutes;renderTimer();}
     if(b.dataset.historyPage){historyPage+=Number(b.dataset.historyPage);renderHistory();}
   });
@@ -262,7 +271,10 @@
     const el=e.target;if(el.dataset.complete)setTaskStatus(el.dataset.complete,el.checked?'done':'queued',el);
     if(el.dataset.status)setTaskStatus(el.dataset.status,el.value,el);
   });
-  ['#task-search','#task-scope','#task-category'].forEach(id=>$(id).addEventListener('input',renderTasks));
+  ['#task-search','#task-scope','#task-category'].forEach(id=>$(id).addEventListener('input',()=>{taskLimit=5;renderTasks();}));
+  $('#task-sort').onchange=e=>{prefs.sort=e.target.value;taskLimit=5;preferences();renderTasks();};
+  $('#task-more').onclick=()=>{taskLimit+=5;renderTasks();if($('#task-more').hidden)$('#task-less').focus();};
+  $('#task-less').onclick=()=>{taskLimit=5;renderTasks();$('#task-more').focus();};
   $('#group-by').onchange=e=>{prefs.group=e.target.value;preferences();renderTasks();};
   $('#compact').onchange=e=>{prefs.compact=e.target.checked;preferences();renderTasks();};
   function expand(open){$$('#task-list .group').forEach(d=>{d.open=open;prefs.collapsed[d.dataset.group]=!open;});preferences();}

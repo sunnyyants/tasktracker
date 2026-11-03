@@ -5,16 +5,49 @@
   const day = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
   const xpFor = p => ({high:40,medium:30,low:20})[p];
   function initial() {
-    return {version:1,tasks:[],rewards:[{id:uid(),name:'Coffee break',cost:50,minutes:10},{id:uid(),name:'Game time',cost:100,minutes:30},{id:uid(),name:'Off-grid reset',cost:30,minutes:15}],ledger:[],sessions:[],timer:null};
+    return {version:1,categories:['Work','Design','Deep work','Admin'],tasks:[],rewards:[{id:uid(),name:'Coffee break',cost:50,minutes:10},{id:uid(),name:'Game time',cost:100,minutes:30},{id:uid(),name:'Off-grid reset',cost:30,minutes:15}],ledger:[],sessions:[],timer:null};
   }
   const balance = s => s.ledger.reduce((v,t)=>v+t.amount,0);
   const xp = s => s.tasks.reduce((v,t)=>v+(t.earnedXp||0),0);
+  function migrateCategories(s) {
+    if(s.categories!==undefined)return s;
+    const names=new Map();
+    ['Work','Design','Deep work','Admin',...s.tasks.map(t=>t.category)].forEach(name=>{if(!names.has(name.toLowerCase()))names.set(name.toLowerCase(),name);});
+    s.categories=[...names.values()];
+    s.tasks.forEach(t=>t.category=names.get(t.category.toLowerCase()));
+    return s;
+  }
+  function saveCategory(s,name,previous) {
+    migrateCategories(s);
+    name=String(name||'').trim();
+    if(!name||name.length>40)throw Error('Enter a category name between 1 and 40 characters.');
+    if(previous!==undefined&&!s.categories.includes(previous))throw Error('Category no longer exists.');
+    if(s.categories.some(c=>c.toLowerCase()===name.toLowerCase()&&c!==previous))throw Error('A category with that name already exists.');
+    if(previous===undefined){if(s.categories.length>=200)throw Error('You can have up to 200 categories.');s.categories.push(name);}
+    else{
+      s.categories=s.categories.map(c=>c===previous?name:c);
+      if(name!==previous)s.tasks.filter(t=>t.category===previous).forEach(t=>{t.category=name;t.events.push({type:'category_changed',from:previous,to:name,at:now()});});
+    }
+    return name;
+  }
+  function deleteCategory(s,name,replacement) {
+    migrateCategories(s);
+    if(!s.categories.includes(name))throw Error('Category no longer exists.');
+    if(s.categories.length===1)throw Error('Keep at least one category. Add another category first.');
+    const tasks=s.tasks.filter(t=>t.category===name);
+    if(tasks.length&&(!s.categories.includes(replacement)||replacement===name))throw Error('Choose another category for the existing tasks.');
+    tasks.forEach(t=>{t.category=replacement;t.events.push({type:'category_changed',from:name,to:replacement,at:now()});});
+    s.categories=s.categories.filter(c=>c!==name);
+  }
   function task(s, values, id) {
     const title = String(values.title||'').trim();
-    const category = String(values.category||'').trim();
+    let category = String(values.category||'').trim();
     if (!title || title.length>200 || !category || category.length>40 || !['high','medium','low'].includes(values.priority) || !/^\d{4}-\d{2}-\d{2}$/.test(values.due)) throw Error('Enter a title, category, priority and date.');
     let t = id ? s.tasks.find(t=>t.id===id && !t.deletedAt) : null;
     if (id && !t) throw Error('Task no longer exists.');
+    migrateCategories(s);
+    const existing=s.categories.find(c=>c.toLowerCase()===category.toLowerCase());
+    category=existing||saveCategory(s,category);
     if (!t) { t={id:uid(),createdAt:now(),completedAt:null,deletedAt:null,status:'queued',earnedXp:0,events:[]}; s.tasks.push(t); }
     Object.assign(t,{title,category,priority:values.priority,due:values.due});
     t.events.push({type:id?'edited':'created',at:now()});
@@ -100,7 +133,9 @@
     if(balance(value)<0)fail();
     for(const t of value.sessions)if(!str(t.id,100)||!str(t.taskId,100)||!str(t.title,200)||!Number.isInteger(t.seconds)||t.seconds<60||t.seconds>10800||!iso(t.startedAt)||!iso(t.endedAt))fail();
     if(value.timer){const t=value.timer;if(!str(t.id,100)||!str(t.taskId,100)||!str(t.title,200)||!value.tasks.some(v=>v.id===t.taskId&&!v.deletedAt)||!Number.isInteger(t.seconds)||t.seconds<60||t.seconds>10800||!Number.isInteger(t.remaining)||t.remaining<0||t.remaining>t.seconds||!(t.deadline===null||Number.isFinite(t.deadline))||!iso(t.startedAt))fail();}
-    return JSON.parse(JSON.stringify(value));
+    const result=migrateCategories(JSON.parse(JSON.stringify(value)));
+    if(!Array.isArray(result.categories)||!result.categories.length||result.categories.length>200||result.categories.some(c=>!str(c,40)||!c.trim()||c!==c.trim())||new Set(result.categories.map(c=>c.toLowerCase())).size!==result.categories.length||result.tasks.some(t=>!result.categories.includes(t.category)))fail();
+    return result;
   }
-  scope.Quest={uid,now,day,xpFor,initial,balance,xp,task,status,remove,reward,redeem,range,history,startTimer,remaining,finishTimer,toggleTimer,validate};
+  scope.Quest={uid,now,day,xpFor,initial,balance,xp,saveCategory,deleteCategory,task,status,remove,reward,redeem,range,history,startTimer,remaining,finishTimer,toggleTimer,validate};
 })(typeof module!=='undefined'?module.exports:globalThis);

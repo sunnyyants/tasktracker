@@ -1,0 +1,7 @@
+FROM python:3.12-alpine
+WORKDIR /app
+COPY server.py .
+COPY dist/ dist/
+VOLUME /data
+EXPOSE 8080
+CMD ["python", "server.py", "--host", "0.0.0.0", "--db", "/data/quest.sqlite3"]

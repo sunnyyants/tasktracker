@@ -1,39 +1,84 @@
-/* QUEST//OS: vanilla browser UI; no network requests or third-party dependencies. */
-(()=>{
+/* QUEST//OS: static browser storage or a same-origin, SQLite-backed LAN server. */
+(async()=>{
   'use strict';
   const Q=globalThis.Quest, KEY='quest-os-v1', VIEW='quest-os-view-v1';
   const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const icon=name=>`<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
   const stamp=v=>v?new Date(v).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'—';
+  const shared=!!globalThis.QUEST_SERVER?.enabled;
+  async function request(url,options={}){
+    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),6000);
+    try{return await fetch(url,{...options,signal:controller.signal});}finally{clearTimeout(timeout);}
+  }
+  let revision=null, saving=false, polling=false;
   let state, raw, storageBlocked=false, toastTimeout, selectedMinutes=25, currentPage='missions', historyPage=0, confirmAction;
   let prefs={layout:'board',group:'status',compact:false,collapsed:{},timerFolded:false};
-  try{raw=localStorage.getItem(KEY);state=raw?Q.validate(JSON.parse(raw)):Q.initial();}catch(e){state=Q.initial();storageBlocked=true;$('#storage-error').hidden=false;$('#storage-error').textContent='Saved data could not be read. Changes are blocked to protect it. Export available data or try this browser’s normal mode.';}
+  if(shared){
+    state=Q.initial();storageBlocked=true;
+    try{const response=await request('api/state',{cache:'no-store'});if(!response.ok)throw Error('Server unavailable');const data=await response.json();state=Q.validate(data.state);revision=data.revision;storageBlocked=false;}catch{$('#storage-error').hidden=false;$('#storage-error').textContent='Cannot reach the shared database. Check that server.py is running; reconnect to continue. Local browser data has not been changed.';}
+  }else{
+    try{raw=localStorage.getItem(KEY);state=raw?Q.validate(JSON.parse(raw)):Q.initial();}catch(e){state=Q.initial();storageBlocked=true;$('#storage-error').hidden=false;$('#storage-error').textContent='Saved data could not be read. Changes are blocked to protect it. Export available data or try this browser’s normal mode.';}
+  }
   try{const p=JSON.parse(localStorage.getItem(VIEW)||'null');if(p&&['board','list'].includes(p.layout)&&['status','category','priority'].includes(p.group))prefs={...prefs,...p};}catch{}
   let storedRaw=raw||null;
   function notify(text){$('#toast').textContent=text;$('#toast').hidden=false;clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>$('#toast').hidden=true,5000);}
   function preferences(){try{localStorage.setItem(VIEW,JSON.stringify(prefs));}catch{} }
-  function change(fn,message){
-    if(storageBlocked){notify('Storage is unavailable. Export a backup before making changes.');return false;}
+  async function change(fn,message){
+    if(saving){notify('A save is still in progress. Please try again in a moment.');return false;}
+    if(storageBlocked){notify(shared?'Reconnect to your shared server before making changes.':'Storage is unavailable. Export a backup before making changes.');return false;}
+    saving=true;
     const before=JSON.stringify(state);
     try{
-      if(localStorage.getItem(KEY)!==storedRaw)throw Error('Another tab changed your data. Reload this tab before continuing.');
-      fn();const next=JSON.stringify(state);localStorage.setItem(KEY,next);storedRaw=next;
+      if(!shared&&localStorage.getItem(KEY)!==storedRaw)throw Error('Another tab changed your data. Reload this tab before continuing.');
+      fn();const next=JSON.stringify(state);
+      if(shared){
+        const response=await request('api/state',{method:'PUT',headers:{'Content-Type':'application/json','If-Match':'"'+revision+'"'},body:next});
+        if(response.status===409){state=JSON.parse(before);await refreshShared(true);notify('Another device saved first. Your change was not applied; review the latest data and try again.');return false;}
+        if(!response.ok)throw Error((await response.json()).error||'Could not save to the shared database.');
+        const data=await response.json();state=Q.validate(data.state);revision=data.revision;
+      }else{localStorage.setItem(KEY,next);storedRaw=next;}
       render();if(message)notify(message);return true;
-    }catch(e){state=JSON.parse(before);notify(e.message||'Could not save. Export a backup and check browser storage.');return false;}
+    }catch(e){state=JSON.parse(before);if(shared)await refreshShared(true);render();notify(shared?'Could not confirm save. '+(e.message||'Check the server connection.')+' Review the latest shared data before retrying.':e.message||'Could not save. Your last saved data is unchanged.');return false;}
+    finally{saving=false;}
+  }
+  async function refreshShared(force=false){
+    if(!shared||polling||saving&&!force)return;
+    polling=true;
+    try{
+      const response=await request('api/state',{cache:'no-store',headers:revision===null?{}:{'If-None-Match':'"'+revision+'"'}});
+      if(response.status===304){$('#storage-error').hidden=true;return;}
+      if(!response.ok)throw Error('Shared server unavailable');
+      const data=await response.json(),next=Q.validate(data.state);
+      // A save may have begun while the GET was in flight. It owns the current state.
+      if(saving&&!force)return;
+      if(revision===null||data.revision>revision){state=next;revision=data.revision;storageBlocked=false;render();}
+      $('#storage-error').hidden=true;
+    }catch{$('#storage-error').hidden=false;$('#storage-error').textContent='Connection to the shared server was lost. Reconnect before editing; unsent changes will not be stored locally.';}
+    finally{polling=false;}
   }
   function confirmation(title,text,fn){$('#confirm-title').textContent=title;$('#confirm-text').textContent=text;confirmAction=fn;$('#confirm-dialog').showModal();}
   $('#confirm-yes').onclick=()=>{const action=confirmAction;$('#confirm-dialog').close();confirmAction=null;action?.();};
   $$('[data-close]').forEach(b=>b.onclick=()=>$('#'+b.dataset.close).close());
-  function categories(){return [...new Set(state.tasks.map(t=>t.category).concat(['Work','Design','Deep work','Admin']))].sort((a,b)=>a.localeCompare(b));}
+  function categories(){return state.categories.slice().sort((a,b)=>a.localeCompare(b));}
   function selectCategories(id){const el=$(id),value=el.value;el.innerHTML='<option value="">All categories</option>'+categories().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');el.value=categories().includes(value)?value:'';}
+  function renderCategories(){
+    const select=$('#task-category-input'),selected=select.value;
+    select.innerHTML=categories().map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+    select.value=state.categories.includes(selected)?selected:state.categories[0];
+    $('#category-list').innerHTML=categories().map((name,i)=>{
+      const count=state.tasks.filter(t=>t.category===name).length;
+      return `<form class="category-row" data-rename-category="${esc(name)}"><label for="category-edit-${i}">Category name<input id="category-edit-${i}" name="categoryName" value="${esc(name)}" required maxlength="40" aria-label="Rename ${esc(name)}"></label><span class="small">${count} task${count===1?'':'s'}</span><div class="category-actions"><button type="submit" aria-label="Save category ${esc(name)}">Save</button><button type="button" class="danger" data-delete-category="${esc(name)}" ${state.categories.length===1?'disabled':''}>Delete</button></div></form>`;
+    }).join('');
+  }
   function render(){
     const xp=Q.xp(state),level=Math.floor(xp/200)+1;
     $('#balance').textContent=Q.balance(state);$('#level').textContent=String(level).padStart(2,'0');$('#xp-label').textContent=`LEVEL ${level} · ${xp%200} / 200 XP`;$('#xp').value=xp%200;
     $('#today-label').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}).toUpperCase();
-    selectCategories('#task-category');selectCategories('#history-category');$('#categories').innerHTML=categories().map(c=>`<option value="${esc(c)}">`).join('');
+    selectCategories('#task-category');selectCategories('#history-category');renderCategories();
     renderRewards();renderTasks();renderHistory();renderTimer();
     $('#data-stats').textContent=`${state.tasks.length} tasks · ${state.rewards.length} rewards · ${state.sessions.length} focus sessions · ${state.ledger.length} credit transactions`;
+    $('#export').disabled=shared&&revision===null;
   }
   function rewardCard(r,tools){
     const cost=Q.balance(state),name=r.name.toLowerCase(),glyph=name.includes('coffee')?'coffee':name.includes('game')?'game':'gift';
@@ -70,7 +115,7 @@
     const f=historyFilters(),rows=Q.history(state,f),size=30,pages=Math.max(1,Math.ceil(rows.length/size));historyPage=Math.min(historyPage,pages-1);
     const [start,end]=Q.range(f.date,f.period);const last=new Date(+end-1);
     $('#history-summary').textContent=`${start.toLocaleDateString()} – ${last.toLocaleDateString()} · ${rows.length} matching tasks`;
-    $('#history-list').innerHTML=rows.slice(historyPage*size,(historyPage+1)*size).map(t=>`<article class="history-card"><div class="between"><h3>${esc(t.title)}</h3><span class="small">${t.deletedAt?'Deleted':statusLabel[t.status]}</span></div><p class="small">${esc(t.category)} · ${t.priority} · due ${esc(t.due)} · ${t.earnedXp} XP earned</p><p class="small">Created ${stamp(t.createdAt)} · Completed ${stamp(t.completedAt)}</p><details><summary>Activity history (${t.events.length})</summary><ul>${t.events.map(e=>`<li>${esc(e.type)} · ${stamp(e.at)}</li>`).join('')}</ul></details>${!t.deletedAt?`<button class="icon-button" data-edit-task="${esc(t.id)}">${icon('edit')}Edit mission</button>`:''}</article>`).join('')||'<div class="empty">No tasks match this period and filters.</div>';
+    $('#history-list').innerHTML=rows.slice(historyPage*size,(historyPage+1)*size).map(t=>`<article class="history-card"><div class="between"><h3>${esc(t.title)}</h3><span class="small">${t.deletedAt?'Deleted':statusLabel[t.status]}</span></div><p class="small">${esc(t.category)} · ${t.priority} · due ${esc(t.due)} · ${t.earnedXp} XP earned</p><p class="small">Created ${stamp(t.createdAt)} · Completed ${stamp(t.completedAt)}</p><details><summary>Activity history (${t.events.length})</summary><ul>${t.events.map(e=>`<li>${esc(e.type)}${e.type==='category_changed'?' · '+esc(e.from)+' → '+esc(e.to):''} · ${stamp(e.at)}</li>`).join('')}</ul></details>${!t.deletedAt?`<button class="icon-button" data-edit-task="${esc(t.id)}">${icon('edit')}Edit mission</button>`:''}</article>`).join('')||'<div class="empty">No tasks match this period and filters.</div>';
     if(pages>1)$('#history-list').insertAdjacentHTML('beforeend',`<div class="pager"><button data-history-page="-1" ${historyPage===0?'disabled':''}>← Previous</button><span>Page ${historyPage+1} / ${pages}</span><button data-history-page="1" ${historyPage===pages-1?'disabled':''}>Next →</button></div>`);
     const sessions=state.sessions.filter(t=>new Date(t.endedAt)>=start&&new Date(t.endedAt)<end&&(!f.category||state.tasks.find(v=>v.id===t.taskId)?.category===f.category)&&t.title.toLowerCase().includes(f.query.toLowerCase())).slice().reverse();
     $('#sessions').innerHTML=sessions.map(t=>`<div class="list-line"><div>${esc(t.title)}<p>${stamp(t.endedAt)}</p></div><span>${Math.round(t.seconds/60)} min</span></div>`).join('')||'<p class="small">No completed focus sessions in this period.</p>';
@@ -91,15 +136,41 @@
   }
   function tickClock(){const left=state.timer?Q.remaining(state):selectedMinutes*60;$('#clock').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');}
   function openTask(id){
-    const t=state.tasks.find(t=>t.id===id);$('#task-form').reset();$('#task-id').value=t?.id||'';$('#task-form-title').textContent=t?'Edit mission':'New mission';$('#task-title').value=t?.title||'';$('#task-category-input').value=t?.category||'Work';$('#task-priority').value=t?.priority||'medium';$('#task-due').value=t?.due||Q.day();$('#task-dialog').showModal();
+    const t=state.tasks.find(t=>t.id===id);$('#task-form').reset();$('#task-id').value=t?.id||'';$('#task-form-title').textContent=t?'Edit mission':'New mission';$('#task-title').value=t?.title||'';$('#task-category-input').value=t?.category||state.categories[0];$('#task-priority').value=t?.priority||'medium';$('#task-due').value=t?.due||Q.day();$('#task-dialog').showModal();
   }
   function openReward(id){const r=state.rewards.find(r=>r.id===id);$('#reward-form').reset();$('#reward-id').value=r?.id||'';$('#reward-name').value=r?.name||'';$('#reward-cost').value=r?.cost||50;$('#reward-minutes').value=r?.minutes||'';$('#reward-dialog h2').textContent=r?'Edit reward':'New reward';$('#reward-dialog').showModal();}
-  $('#task-form').onsubmit=e=>{e.preventDefault();if(change(()=>Q.task(state,{title:$('#task-title').value,category:$('#task-category-input').value,priority:$('#task-priority').value,due:$('#task-due').value},$('#task-id').value),'Mission saved.'))$('#task-dialog').close();};
-  $('#reward-form').onsubmit=e=>{e.preventDefault();if(change(()=>Q.reward(state,{name:$('#reward-name').value,cost:$('#reward-cost').value,minutes:$('#reward-minutes').value},$('#reward-id').value),'Reward saved.'))$('#reward-dialog').close();};
+  $('#category-form').onsubmit=async e=>{
+    e.preventDefault();
+    if(await change(()=>Q.saveCategory(state,$('#category-name').value),'Category added.')){$('#category-form').reset();$('#category-name').focus();}
+  };
+  $('#category-list').addEventListener('submit',async e=>{
+    e.preventDefault();const form=e.target,previous=form.dataset.renameCategory;
+    const name=form.elements.categoryName.value.trim();
+    const selected=['#task-category','#history-category','#task-category-input'].filter(id=>$(id).value===previous);
+    if(await change(()=>Q.saveCategory(state,name,previous),'Category updated.')){
+      selected.forEach(id=>$(id).value=name);renderTasks();renderHistory();
+    }
+  });
+  $('#category-delete-form').onsubmit=async e=>{
+    e.preventDefault();const name=$('#category-delete-name').value,replacement=$('#category-move-to').value;
+    const selected=$('#task-category-input').value===name;
+    if(await change(()=>Q.deleteCategory(state,name,replacement),'Category deleted. Existing tasks were kept.')){if(selected&&replacement)$('#task-category-input').value=replacement;$('#category-delete-dialog').close();}
+  };
+  $('#task-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.task(state,{title:$('#task-title').value,category:$('#task-category-input').value,priority:$('#task-priority').value,due:$('#task-due').value},$('#task-id').value),'Mission saved.'))$('#task-dialog').close();};
+  $('#reward-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.reward(state,{name:$('#reward-name').value,cost:$('#reward-cost').value,minutes:$('#reward-minutes').value},$('#reward-id').value),'Reward saved.'))$('#reward-dialog').close();};
   document.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||b.disabled)return;
     if(b.dataset.action==='add-task')openTask();
     if(b.dataset.action==='add-reward')openReward();
+    if(b.dataset.action==='manage-categories'){renderCategories();$('#category-dialog').showModal();}
+    if(b.dataset.deleteCategory){
+      const name=b.dataset.deleteCategory,count=state.tasks.filter(t=>t.category===name).length;
+      $('#category-delete-name').value=name;
+      $('#category-delete-summary').textContent=`Delete “${name}”? ${count} task record${count===1?' uses':'s use'} this category.`;
+      $('#category-move-to').innerHTML=categories().filter(c=>c!==name).map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('');
+      $('#category-move-label').hidden=!count;
+      $('#category-delete-dialog').showModal();
+    }
     if(b.dataset.editTask)openTask(b.dataset.editTask);
     if(b.dataset.editReward)openReward(b.dataset.editReward);
     if(b.dataset.deleteTask)confirmation('Delete this mission?','It will leave the mission queue. Its history and previously earned XP and credits are preserved.',()=>change(()=>Q.remove(state,b.dataset.deleteTask),'Mission deleted; history kept.'));
@@ -128,14 +199,25 @@
   };
   $('#timer-reset').onclick=()=>confirmation('Reset this focus session?','The current session will be discarded. Completed sessions stay in history.',()=>change(()=>{state.timer=null;},'Timer reset.'));
   $('#timer-fold').onclick=()=>{prefs.timerFolded=!prefs.timerFolded;preferences();renderTimer();};
-  setInterval(()=>{if(state.timer?.deadline&&Q.remaining(state)===0){change(()=>Q.finishTimer(state),'Focus session complete. Take a break!');}else tickClock();if($('#today-label').dataset.date!==Q.day()){$('#today-label').dataset.date=Q.day();renderTasks();}},1000);
+  setInterval(()=>{if(!saving&&state.timer?.deadline&&Q.remaining(state)===0){change(()=>Q.finishTimer(state),'Focus session complete. Take a break!');}else tickClock();if($('#today-label').dataset.date!==Q.day()){$('#today-label').dataset.date=Q.day();renderTasks();}},1000);
   function route(){currentPage=['missions','history','rewards','data'].includes(location.hash.slice(1))?location.hash.slice(1):'missions';$$('.page').forEach(p=>p.hidden=p.id!==currentPage+'-page');$$('nav a').forEach(a=>{if(a.dataset.page===currentPage)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});const titles={missions:['Your next objective.','Lock in. Clear your missions. Upgrade your day.'],history:['Your mission archive.','Every step forward leaves a trace.'],rewards:['Work hard. Recharge well.','Build a reward system that works for you.'],data:['Take your progress anywhere.','Simple files. Your data. No lock-in.']};$('#page-title').textContent=titles[currentPage][0];$('#page-subtitle').textContent=titles[currentPage][1];}
   window.addEventListener('hashchange',route);
-  window.addEventListener('storage',e=>{if(e.key!==KEY)return;try{if(!e.newValue)throw Error('Saved data was removed in another tab.');state=Q.validate(JSON.parse(e.newValue));storedRaw=e.newValue;render();notify('Updated from another tab.');}catch{notify('Data changed in another tab. Reload before editing.');}});
+  window.addEventListener('storage',e=>{if(shared||e.key!==KEY)return;try{if(!e.newValue)throw Error('Saved data was removed in another tab.');state=Q.validate(JSON.parse(e.newValue));storedRaw=e.newValue;render();notify('Updated from another tab.');}catch{notify('Data changed in another tab. Reload before editing.');}});
   $('#export').onclick=()=>{const blob=new Blob([JSON.stringify({...state,exportedAt:Q.now()},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='quest-os-backup-'+Q.day()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notify('Backup exported. Keep it somewhere safe.');};
   $('#import-open').onclick=()=>$('#import-file').click();
-  $('#import-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{if(file.size>5*1024*1024)throw Error('Backup is larger than the 5 MB import limit.');const imported=Q.validate(JSON.parse(await file.text()));confirmation('Replace this device’s data?',`Import ${imported.tasks.length} tasks, ${imported.rewards.length} rewards and ${imported.sessions.length} sessions? This replaces current data. Export a backup first if needed.`,()=>change(()=>{state=imported;},'Backup imported.'));}catch(err){notify(err.message||'Could not read this backup.');}};
-  if(!storedRaw&&!storageBlocked){try{storedRaw=JSON.stringify(state);localStorage.setItem(KEY,storedRaw);}catch{storageBlocked=true;$('#storage-error').hidden=false;$('#storage-error').textContent='Browser storage is unavailable. Enable site storage to save your progress.';}}
+  $('#import-file').onchange=async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;try{if(file.size>5*1024*1024)throw Error('Backup is larger than the 5 MB import limit.');const imported=Q.validate(JSON.parse(await file.text()));confirmation(shared?'Replace the shared workspace?':'Replace this device’s data?',`Import ${imported.tasks.length} tasks, ${imported.rewards.length} rewards and ${imported.sessions.length} sessions? This replaces ${shared?'data for every connected device':'current data'}. Export a backup first if needed.`,()=>change(()=>{state=imported;},'Backup imported.'));}catch(err){notify(err.message||'Could not read this backup.');}};
+  if(!shared&&!storedRaw&&!storageBlocked){try{storedRaw=JSON.stringify(state);localStorage.setItem(KEY,storedRaw);}catch{storageBlocked=true;$('#storage-error').hidden=false;$('#storage-error').textContent='Browser storage is unavailable. Enable site storage to save your progress.';}}
   if(state.timer?.deadline&&Q.remaining(state)===0)change(()=>Q.finishTimer(state),'Your focus session finished while you were away.');
+  if(shared){
+    $('.storage-label').innerHTML='SQLite shared workspace<br>Updates across devices';
+    $('footer span').textContent='LAN SYNC · SQLITE · ZERO DEPENDENCIES';
+    $('#data-page h2').textContent='One workspace. Every device.';
+    $('#data-page .data-card>p').textContent='Tasks, rewards, focus sessions and credits are saved in SQLite on the host Mac. Connected devices refresh automatically every three seconds. Browser-local data is kept separate.';
+    const notes=$$('#data-page .small');
+    notes[0].textContent='Import replaces the shared workspace for ALL connected devices after confirmation. Export a backup first. To move existing browser data here, export it from the old app and import it once.';
+    notes[1].textContent='Keep the host Mac awake and server.py running. This is one shared workspace, not separate user accounts. If the server is unreachable, changes are not saved locally.';
+    setInterval(()=>refreshShared(),3000);
+    window.addEventListener('focus',()=>refreshShared());
+  }
   render();route();
 })();

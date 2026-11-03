@@ -1,3 +1,13 @@
 .DS_Store
 *.zip
 *.tar.gz
+
+data/
+__pycache__/
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
+*.db
+*.db-shm
+*.db-wal
+quest-os-backup-*.json

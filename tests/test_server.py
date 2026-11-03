@@ -61,6 +61,23 @@ class StoreTests(unittest.TestCase):
         migrated = server_module.validate(legacy)
         self.assertIn('Work', migrated['categories'])
 
+    def test_effort_and_new_xp_persist_and_legacy_earned_xp_stays_unchanged(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = server_module.Store(Path(temp) / 'test.sqlite3')
+            value = store.read()['state']
+            task = dict(id='effort-task', title='A large task', category='Work', priority='high', effort='epic', due='2026-11-03', createdAt='2026-11-03T09:00:00Z', completedAt='2026-11-03T10:00:00Z', deletedAt=None, status='done', earnedXp=120, events=[])
+            value['tasks'] = [task]
+            store.write(1, value)
+            self.assertEqual(store.read()['state']['tasks'][0]['earnedXp'], 120)
+            del task['effort']
+            task['earnedXp'] = 40
+            migrated = server_module.validate(value)
+            self.assertEqual(migrated['tasks'][0]['effort'], 'medium')
+            self.assertEqual(migrated['tasks'][0]['earnedXp'], 40)
+            task['effort'] = 'invalid'
+            with self.assertRaises(ValueError):
+                store.write(2, value)
+
 
 class ApiTests(unittest.TestCase):
     @classmethod

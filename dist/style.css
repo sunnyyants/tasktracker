@@ -3,6 +3,15 @@
 @media(min-width:1450px){#task-list.board{grid-template-columns:repeat(3,minmax(0,1fr))}.reward-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:1120px){.shell{grid-template-columns:190px minmax(0,1fr)}aside{padding:24px 14px}main{padding:26px 22px}#task-list.board{grid-template-columns:1fr}.board .task-card{align-items:center}.board .task-main{flex-basis:0}.board .task-actions{width:auto;margin:0}.expand-tools{margin-left:0}.brand{font-size:18px}}
 @media(max-width:700px){.shell{grid-template-columns:1fr}aside{padding:18px;border-right:0;border-bottom:1px solid var(--line);gap:5px}aside>.eyebrow,.operator,.storage-label{display:none}nav{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 0}nav a{font-size:11px;padding:8px}nav a svg{width:14px;height:14px}.brand{font-size:21px}main{padding:22px 16px}h1{font-size:26px}.page-header{gap:15px}.reward-grid{grid-template-columns:1fr}.reward-panel{padding:14px}.reward-card{gap:8px}.task-filters{grid-template-columns:1fr 1fr}.task-filters>.search-label{grid-column:1/-1}.emblem{display:none}.timer-body{flex-wrap:wrap;gap:14px}.timer-fields{flex-basis:100%}#clock{font-size:40px}.history-filters{grid-template-columns:1fr 1fr}.task-card,.board .task-card{flex-wrap:wrap}.task-main,.board .task-main{flex-basis:calc(100% - 30px)}.task-actions,.board .task-actions{width:100%;justify-content:space-between;margin-left:25px}.view-tools{gap:10px}.form-grid{grid-template-columns:1fr}input,select{font-size:16px}button{min-height:38px}.reward-card .reward-tools button{min-height:30px}.daily{padding:16px}footer{font-size:9px}}
+.overdue-banner{display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap;border:1px solid #a46c3e;border-left:4px solid #ffb66b;background:#30241e;padding:18px;border-radius:5px;margin:22px 0;color:#ffd5a6}
+.overdue-banner p{font-size:12px;margin:6px 0 0;color:#e0c4a7}
+.task-card.is-overdue{border-left:3px solid #ffb66b;background:#1d1d2b}
+.overdue-tag{display:inline-block;color:#ffd3b1;background:#402832;padding:2px 6px;border-radius:3px;font-size:10px;margin-top:5px;letter-spacing:1px}
+.task-card .overdue{background:#402832;color:#ffd3b1;padding:3px 6px;border-radius:3px}
+#overdue-dialog{width:min(650px,calc(100% - 30px))}
+.overdue-row{padding:18px 0;border-top:1px solid var(--line)}
+.overdue-row h3{overflow-wrap:anywhere}
+.xp-preview{padding:12px;background:var(--soft);border-left:2px solid var(--cyan);color:var(--cyan);font-size:12px;margin:18px 0 0}
 .category-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 #category-dialog{width:min(680px,calc(100% - 30px))}
 .category-add{display:flex;align-items:end;gap:10px;margin:20px 0;padding-bottom:20px;border-bottom:1px solid var(--line)}

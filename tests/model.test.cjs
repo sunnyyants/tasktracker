@@ -51,3 +51,30 @@ test('legacy backups gain their existing categories, and the final category cann
   assert.throws(()=>Q.validate({...empty,categories:['Work','work']}),/backup/);
   assert.throws(()=>Q.validate({...migrated,categories:['Missing task category']}),/backup/);
 });
+test('XP combines priority with estimated effort for all twelve combinations',()=>{
+  for(const priority of ['low','medium','high'])for(const effort of ['small','medium','large','epic']){
+    const s=Q.initial(),t=add(s,{priority,effort});Q.status(s,t.id,'done');
+    const expected=({low:20,medium:30,high:40})[priority]*({small:.5,medium:1,large:2,epic:3})[effort];
+    assert.equal(t.earnedXp,expected);assert.equal(Q.balance(s),10);assert.deepEqual(Q.validate(s),s);
+  }
+  assert.ok(Q.xpFor('low','large')>Q.xpFor('high','small'));
+});
+test('old tasks default to medium effort without recalculating earned rewards',()=>{
+  const s=Q.initial(),t=add(s);Q.status(s,t.id,'done');delete t.effort;
+  const migrated=Q.validate(s);assert.equal(migrated.tasks[0].effort,'medium');assert.equal(migrated.tasks[0].earnedXp,40);assert.equal(Q.balance(migrated),10);
+  Q.status(migrated,t.id,'queued');Q.task(migrated,{title:t.title,category:t.category,priority:'high',effort:'epic',due:t.due},t.id);Q.status(migrated,t.id,'done');
+  assert.equal(migrated.tasks[0].earnedXp,40);assert.equal(Q.balance(migrated),10);
+  assert.throws(()=>add(Q.initial(),{effort:'invalid'}),/effort estimate/);
+  assert.throws(()=>Q.validate({...migrated,tasks:[{...migrated.tasks[0],effort:'invalid'}]}),/backup/);
+});
+test('overdue review excludes completed and deleted tasks and reschedules without losing history',()=>{
+  const s=Q.initial(),old=add(s,{due:'2026-11-01',effort:'large'}),done=add(s,{due:'2026-11-01'}),deleted=add(s,{due:'2026-11-01'});
+  Q.status(s,done.id,'done');Q.remove(s,deleted.id);
+  assert.deepEqual(Q.overdue(s,'2026-11-03').map(t=>t.id),[old.id]);
+  assert.throws(()=>Q.reschedule(s,old.id,'2026-11-02','low','2026-11-03'),/today or a future/);
+  Q.reschedule(s,old.id,'2026-11-04','medium','2026-11-03');
+  assert.equal(old.effort,'large');assert.equal(Q.xpFor(old.priority,old.effort),60);assert.equal(old.due,'2026-11-04');assert.equal(old.createdAt,s.tasks[0].createdAt);
+  assert.equal(Q.overdue(s,'2026-11-03').length,0);
+  const log=old.events.find(e=>e.type==='rescheduled');assert.equal(log.fromDue,'2026-11-01');assert.equal(log.toDue,'2026-11-04');assert.equal(log.fromPriority,'high');assert.equal(log.toPriority,'medium');
+  assert.equal(Q.balance(s),10);assert.equal(old.earnedXp,0);assert.deepEqual(Q.validate(s),s);
+});

@@ -76,7 +76,7 @@
     $('#balance').textContent=Q.balance(state);$('#level').textContent=String(level).padStart(2,'0');$('#xp-label').textContent=`LEVEL ${level} · ${xp%200} / 200 XP`;$('#xp').value=xp%200;
     $('#today-label').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}).toUpperCase();
     selectCategories('#task-category');selectCategories('#history-category');renderCategories();
-    renderRewards();renderTasks();renderHistory();renderTimer();
+    renderRewards();renderTasks();renderHistory();renderTimer();renderOverdue();
     $('#data-stats').textContent=`${state.tasks.length} tasks · ${state.rewards.length} rewards · ${state.sessions.length} focus sessions · ${state.ledger.length} credit transactions`;
     $('#export').disabled=shared&&revision===null;
   }
@@ -91,9 +91,10 @@
     const receipts=state.ledger.filter(l=>l.type==='reward').slice().reverse();
     $('#redemptions').innerHTML=receipts.map(r=>`<div class="list-line"><div><strong>${esc(r.label)}</strong><p>${stamp(r.at)}${r.minutes?' · '+r.minutes+' min break':''}</p></div><span>${r.amount} credits</span></div>`).join('')||'<p class="small">No rewards redeemed yet.</p>';
   }
+  const effortLabel={small:'Small',medium:'Medium',large:'Large',epic:'Major'};
   const statusLabel={queued:'Queued',progress:'In progress',done:'Completed'};
   function taskCard(t){
-    return `<article class="task-card ${t.status==='done'?'done':''}"><input type="checkbox" data-complete="${esc(t.id)}" aria-label="Complete ${esc(t.title)}" ${t.status==='done'?'checked':''}><div class="task-main"><strong>${esc(t.title)}</strong><div class="task-meta"><span>${icon('tag')} ${esc(t.category)}</span><span class="priority ${t.priority}">${t.priority==='high'?'↑↑':t.priority==='medium'?'↑':'↓'} ${t.priority}</span><span class="${t.due<Q.day()&&t.status!=='done'?'overdue':''}">${esc(t.due)}${t.due<Q.day()&&t.status!=='done'?' · overdue':''}</span><span class="xp-reward">${t.earnedXp?'✓ '+t.earnedXp:'+'+Q.xpFor(t.priority)} XP</span></div></div><div class="task-actions"><select class="task-status" data-status="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v}</option>`).join('')}</select><div class="task-tools">${t.status!=='done'?`<button data-focus="${esc(t.id)}" aria-label="Focus on ${esc(t.title)}">${icon('timer')}</button>`:''}<button data-edit-task="${esc(t.id)}" aria-label="Edit ${esc(t.title)}">${icon('edit')}</button><button data-delete-task="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">${icon('trash')}</button></div></div></article>`;
+    return `<article class="task-card ${t.status==='done'?'done':''} ${t.due<Q.day()&&t.status!=='done'?'is-overdue':''}"><input type="checkbox" data-complete="${esc(t.id)}" aria-label="Complete ${esc(t.title)}" ${t.status==='done'?'checked':''}><div class="task-main"><strong>${esc(t.title)}</strong>${t.due<Q.day()&&t.status!=='done'?'<span class="overdue-tag">OVERDUE</span>':''}<div class="task-meta"><span>${icon('tag')} ${esc(t.category)}</span><span>${esc(effortLabel[t.effort])} effort</span><span class="priority ${t.priority}">${t.priority==='high'?'↑↑':t.priority==='medium'?'↑':'↓'} ${t.priority}</span><span class="${t.due<Q.day()&&t.status!=='done'?'overdue':''}">${esc(t.due)}${t.due<Q.day()&&t.status!=='done'?' · OVERDUE':''}</span><span class="xp-reward">${t.earnedXp?'✓ '+t.earnedXp:'+'+Q.xpFor(t.priority,t.effort)} XP</span></div></div><div class="task-actions"><select class="task-status" data-status="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v}</option>`).join('')}</select><div class="task-tools">${t.status!=='done'?`<button data-focus="${esc(t.id)}" aria-label="Focus on ${esc(t.title)}">${icon('timer')}</button>`:''}<button data-edit-task="${esc(t.id)}" aria-label="Edit ${esc(t.title)}">${icon('edit')}</button><button data-delete-task="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">${icon('trash')}</button></div></div></article>`;
   }
   function renderTasks(){
     const today=Q.day(),scope=$('#task-scope').value,query=$('#task-search').value.toLowerCase(),cat=$('#task-category').value;
@@ -110,12 +111,20 @@
     $$('#task-list details').forEach(d=>d.addEventListener('toggle',()=>{prefs.collapsed[d.dataset.group]=!d.open;preferences();}));
     $$('[data-layout]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.layout===prefs.layout)));$('#group-by').value=prefs.group;$('#compact').checked=prefs.compact;
   }
+  function renderOverdue(){
+    const tasks=Q.overdue(state);$('#overdue-banner').hidden=!tasks.length;
+    $('#overdue-count').textContent=`${tasks.length} overdue mission${tasks.length===1?'':'s'} need${tasks.length===1?'s':''} a new plan`;
+    const next=new Date();next.setDate(next.getDate()+1);
+    $('#overdue-list').innerHTML=tasks.map(t=>`<form class="overdue-row" data-reschedule="${esc(t.id)}"><h3>${esc(t.title)}</h3><p class="small">Was due ${esc(t.due)} · ${esc(t.category)} · ${effortLabel[t.effort]} effort</p><div class="form-grid"><label>New priority<select name="priority">${['low','medium','high'].map(p=>`<option value="${p}" ${p===t.priority?'selected':''}>${p} · ${Q.xpFor(p,t.effort)} XP${t.earnedXp?' estimate (already rewarded)':''}</option>`).join('')}</select></label><label>New due date<input name="due" type="date" min="${Q.day()}" value="${Q.day()}" required></label></div><div class="actions"><button type="button" data-due-preset="${Q.day()}">Today</button><button type="button" data-due-preset="${Q.day(next)}">Tomorrow</button><button type="submit" class="primary">Save new plan</button></div></form>`).join('')||'<p class="empty">All caught up. No overdue missions remain.</p>';
+  }
+  $('#overdue-filter').onclick=()=>{$('#task-scope').value='overdue';$('#task-search').value='';$('#task-category').value='';renderTasks();$('#task-list').scrollIntoView({behavior:'smooth',block:'start'});};
+  $('#overdue-list').addEventListener('submit',async e=>{e.preventDefault();const form=e.target;await change(()=>Q.reschedule(state,form.dataset.reschedule,form.elements.due.value,form.elements.priority.value),'Task rescheduled. Previous due date kept in history.');});
   function historyFilters(){return {date:$('#history-date').value||Q.day(),period:$('#history-period').value,basis:$('#history-basis').value,category:$('#history-category').value,status:$('#history-status').value,query:$('#history-search').value};}
   function renderHistory(){
     const f=historyFilters(),rows=Q.history(state,f),size=30,pages=Math.max(1,Math.ceil(rows.length/size));historyPage=Math.min(historyPage,pages-1);
     const [start,end]=Q.range(f.date,f.period);const last=new Date(+end-1);
     $('#history-summary').textContent=`${start.toLocaleDateString()} – ${last.toLocaleDateString()} · ${rows.length} matching tasks`;
-    $('#history-list').innerHTML=rows.slice(historyPage*size,(historyPage+1)*size).map(t=>`<article class="history-card"><div class="between"><h3>${esc(t.title)}</h3><span class="small">${t.deletedAt?'Deleted':statusLabel[t.status]}</span></div><p class="small">${esc(t.category)} · ${t.priority} · due ${esc(t.due)} · ${t.earnedXp} XP earned</p><p class="small">Created ${stamp(t.createdAt)} · Completed ${stamp(t.completedAt)}</p><details><summary>Activity history (${t.events.length})</summary><ul>${t.events.map(e=>`<li>${esc(e.type)}${e.type==='category_changed'?' · '+esc(e.from)+' → '+esc(e.to):''} · ${stamp(e.at)}</li>`).join('')}</ul></details>${!t.deletedAt?`<button class="icon-button" data-edit-task="${esc(t.id)}">${icon('edit')}Edit mission</button>`:''}</article>`).join('')||'<div class="empty">No tasks match this period and filters.</div>';
+    $('#history-list').innerHTML=rows.slice(historyPage*size,(historyPage+1)*size).map(t=>`<article class="history-card"><div class="between"><h3>${esc(t.title)}</h3><span class="small">${t.deletedAt?'Deleted':statusLabel[t.status]}</span></div><p class="small">${esc(t.category)} · ${t.priority} · ${esc(effortLabel[t.effort])} effort · due ${esc(t.due)} · ${t.earnedXp} XP earned</p><p class="small">Created ${stamp(t.createdAt)} · Completed ${stamp(t.completedAt)}</p><details><summary>Activity history (${t.events.length})</summary><ul>${t.events.map(e=>`<li>${esc(e.type)}${e.type==='category_changed'?' · '+esc(e.from)+' → '+esc(e.to):e.type==='rescheduled'?' · '+esc(e.fromDue)+' → '+esc(e.toDue)+' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):e.type==='reprioritized'?' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):''} · ${stamp(e.at)}</li>`).join('')}</ul></details>${!t.deletedAt?`<button class="icon-button" data-edit-task="${esc(t.id)}">${icon('edit')}Edit mission</button>`:''}</article>`).join('')||'<div class="empty">No tasks match this period and filters.</div>';
     if(pages>1)$('#history-list').insertAdjacentHTML('beforeend',`<div class="pager"><button data-history-page="-1" ${historyPage===0?'disabled':''}>← Previous</button><span>Page ${historyPage+1} / ${pages}</span><button data-history-page="1" ${historyPage===pages-1?'disabled':''}>Next →</button></div>`);
     const sessions=state.sessions.filter(t=>new Date(t.endedAt)>=start&&new Date(t.endedAt)<end&&(!f.category||state.tasks.find(v=>v.id===t.taskId)?.category===f.category)&&t.title.toLowerCase().includes(f.query.toLowerCase())).slice().reverse();
     $('#sessions').innerHTML=sessions.map(t=>`<div class="list-line"><div>${esc(t.title)}<p>${stamp(t.endedAt)}</p></div><span>${Math.round(t.seconds/60)} min</span></div>`).join('')||'<p class="small">No completed focus sessions in this period.</p>';
@@ -136,7 +145,7 @@
   }
   function tickClock(){const left=state.timer?Q.remaining(state):selectedMinutes*60;$('#clock').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');}
   function openTask(id){
-    const t=state.tasks.find(t=>t.id===id);$('#task-form').reset();$('#task-id').value=t?.id||'';$('#task-form-title').textContent=t?'Edit mission':'New mission';$('#task-title').value=t?.title||'';$('#task-category-input').value=t?.category||state.categories[0];$('#task-priority').value=t?.priority||'medium';$('#task-due').value=t?.due||Q.day();$('#task-dialog').showModal();
+    const t=state.tasks.find(t=>t.id===id);$('#task-form').reset();$('#task-id').value=t?.id||'';$('#task-form-title').textContent=t?'Edit mission':'New mission';$('#task-title').value=t?.title||'';$('#task-category-input').value=t?.category||state.categories[0];$('#task-priority').value=t?.priority||'medium';$('#task-effort').value=t?.effort||'medium';$('#task-due').value=t?.due||Q.day();renderXpPreview();$('#task-dialog').showModal();
   }
   function openReward(id){const r=state.rewards.find(r=>r.id===id);$('#reward-form').reset();$('#reward-id').value=r?.id||'';$('#reward-name').value=r?.name||'';$('#reward-cost').value=r?.cost||50;$('#reward-minutes').value=r?.minutes||'';$('#reward-dialog h2').textContent=r?'Edit reward':'New reward';$('#reward-dialog').showModal();}
   $('#category-form').onsubmit=async e=>{
@@ -156,12 +165,20 @@
     const selected=$('#task-category-input').value===name;
     if(await change(()=>Q.deleteCategory(state,name,replacement),'Category deleted. Existing tasks were kept.')){if(selected&&replacement)$('#task-category-input').value=replacement;$('#category-delete-dialog').close();}
   };
-  $('#task-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.task(state,{title:$('#task-title').value,category:$('#task-category-input').value,priority:$('#task-priority').value,due:$('#task-due').value},$('#task-id').value),'Mission saved.'))$('#task-dialog').close();};
+  function renderXpPreview(){
+    const t=state.tasks.find(t=>t.id===$('#task-id').value),priority=$('#task-priority').value,effort=$('#task-effort').value;
+    $('#task-xp-preview').textContent=t?.earnedXp?`Already earned: ${t.earnedXp} XP. Editing or reopening won't grant additional XP.`:`${Q.xpFor(priority)} base XP × ${Q.effortFactors[effort]} effort = ${Q.xpFor(priority,effort)} XP on first completion`;
+  }
+  $('#task-priority').addEventListener('change',renderXpPreview);
+  $('#task-effort').addEventListener('change',renderXpPreview);
+  $('#task-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.task(state,{title:$('#task-title').value,category:$('#task-category-input').value,priority:$('#task-priority').value,effort:$('#task-effort').value,due:$('#task-due').value},$('#task-id').value),'Mission saved.'))$('#task-dialog').close();};
   $('#reward-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.reward(state,{name:$('#reward-name').value,cost:$('#reward-cost').value,minutes:$('#reward-minutes').value},$('#reward-id').value),'Reward saved.'))$('#reward-dialog').close();};
   document.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||b.disabled)return;
     if(b.dataset.action==='add-task')openTask();
     if(b.dataset.action==='add-reward')openReward();
+    if(b.dataset.action==='review-overdue'){renderOverdue();$('#overdue-dialog').showModal();}
+    if(b.dataset.duePreset)b.closest('form').elements.due.value=b.dataset.duePreset;
     if(b.dataset.action==='manage-categories'){renderCategories();$('#category-dialog').showModal();}
     if(b.dataset.deleteCategory){
       const name=b.dataset.deleteCategory,count=state.tasks.filter(t=>t.category===name).length;
@@ -199,7 +216,7 @@
   };
   $('#timer-reset').onclick=()=>confirmation('Reset this focus session?','The current session will be discarded. Completed sessions stay in history.',()=>change(()=>{state.timer=null;},'Timer reset.'));
   $('#timer-fold').onclick=()=>{prefs.timerFolded=!prefs.timerFolded;preferences();renderTimer();};
-  setInterval(()=>{if(!saving&&state.timer?.deadline&&Q.remaining(state)===0){change(()=>Q.finishTimer(state),'Focus session complete. Take a break!');}else tickClock();if($('#today-label').dataset.date!==Q.day()){$('#today-label').dataset.date=Q.day();renderTasks();}},1000);
+  setInterval(()=>{if(!saving&&state.timer?.deadline&&Q.remaining(state)===0){change(()=>Q.finishTimer(state),'Focus session complete. Take a break!');}else tickClock();if($('#today-label').dataset.date!==Q.day()){$('#today-label').dataset.date=Q.day();renderTasks();renderOverdue();}},1000);
   function route(){currentPage=['missions','history','rewards','data'].includes(location.hash.slice(1))?location.hash.slice(1):'missions';$$('.page').forEach(p=>p.hidden=p.id!==currentPage+'-page');$$('nav a').forEach(a=>{if(a.dataset.page===currentPage)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});const titles={missions:['Your next objective.','Lock in. Clear your missions. Upgrade your day.'],history:['Your mission archive.','Every step forward leaves a trace.'],rewards:['Work hard. Recharge well.','Build a reward system that works for you.'],data:['Take your progress anywhere.','Simple files. Your data. No lock-in.']};$('#page-title').textContent=titles[currentPage][0];$('#page-subtitle').textContent=titles[currentPage][1];}
   window.addEventListener('hashchange',route);
   window.addEventListener('storage',e=>{if(shared||e.key!==KEY)return;try{if(!e.newValue)throw Error('Saved data was removed in another tab.');state=Q.validate(JSON.parse(e.newValue));storedRaw=e.newValue;render();notify('Updated from another tab.');}catch{notify('Data changed in another tab. Reload before editing.');}});

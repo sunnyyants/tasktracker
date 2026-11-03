@@ -3,7 +3,9 @@
   const uid = () => globalThis.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2);
   const now = () => new Date().toISOString();
   const day = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-  const xpFor = p => ({high:40,medium:30,low:20})[p];
+  const effortFactors = {small:0.5,medium:1,large:2,epic:3};
+  const xpFor = (priority,effort='medium') => ({high:40,medium:30,low:20})[priority]*effortFactors[effort];
+  const validXp = new Set([0,...['low','medium','high'].flatMap(p=>Object.keys(effortFactors).map(e=>xpFor(p,e)))]);
   function initial() {
     return {version:1,categories:['Work','Design','Deep work','Admin'],tasks:[],rewards:[{id:uid(),name:'Coffee break',cost:50,minutes:10},{id:uid(),name:'Game time',cost:100,minutes:30},{id:uid(),name:'Off-grid reset',cost:30,minutes:15}],ledger:[],sessions:[],timer:null};
   }
@@ -45,11 +47,15 @@
     if (!title || title.length>200 || !category || category.length>40 || !['high','medium','low'].includes(values.priority) || !/^\d{4}-\d{2}-\d{2}$/.test(values.due)) throw Error('Enter a title, category, priority and date.');
     let t = id ? s.tasks.find(t=>t.id===id && !t.deletedAt) : null;
     if (id && !t) throw Error('Task no longer exists.');
+    const effort=values.effort??t?.effort??'medium';
+    if(!Object.hasOwn(effortFactors,effort))throw Error('Choose a valid effort estimate.');
     migrateCategories(s);
     const existing=s.categories.find(c=>c.toLowerCase()===category.toLowerCase());
     category=existing||saveCategory(s,category);
     if (!t) { t={id:uid(),createdAt:now(),completedAt:null,deletedAt:null,status:'queued',earnedXp:0,events:[]}; s.tasks.push(t); }
-    Object.assign(t,{title,category,priority:values.priority,due:values.due});
+    if(id&&t.due!==values.due)t.events.push({type:'rescheduled',fromDue:t.due,toDue:values.due,fromPriority:t.priority,toPriority:values.priority,at:now()});
+    else if(id&&t.priority!==values.priority)t.events.push({type:'reprioritized',fromPriority:t.priority,toPriority:values.priority,at:now()});
+    Object.assign(t,{title,category,priority:values.priority,effort,due:values.due});
     t.events.push({type:id?'edited':'created',at:now()});
     return t;
   }
@@ -62,7 +68,7 @@
     if(value==='done') {
       t.completedAt=now();
       if (!t.earnedXp) {
-        t.earnedXp=xpFor(t.priority);
+        t.earnedXp=xpFor(t.priority,t.effort);
         s.ledger.push({id:uid(),at:now(),amount:10,type:'task',taskId:t.id,label:t.title});
       }
     }
@@ -97,6 +103,13 @@
     if(period==='month') end.setMonth(end.getMonth()+1);else end.setDate(end.getDate()+(period==='week'?7:1));
     return [start,end];
   }
+  function overdue(s,date=day()) {return s.tasks.filter(t=>!t.deletedAt&&t.status!=='done'&&t.due<date).sort((a,b)=>a.due.localeCompare(b.due));}
+  function reschedule(s,id,due,priority,date=day()) {
+    const t=s.tasks.find(t=>t.id===id&&!t.deletedAt&&t.status!=='done');
+    if(!t)throw Error('Choose an active task.');
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(due)||due<date)throw Error('Choose today or a future date.');
+    return task(s,{...t,due,priority},id);
+  }
   function history(s,f) {
     const [start,end]=range(f.date,f.period);
     return s.tasks.filter(t=>{
@@ -127,15 +140,16 @@
     const str=(v,max)=>typeof v==='string'&&v.length<=max;
     const iso=v=>str(v,40)&&Number.isFinite(Date.parse(v));
     for(const k of ['tasks','rewards','ledger','sessions'])if(new Set(value[k].map(v=>v.id)).size!==value[k].length)fail();
-    for(const t of value.tasks)if(!str(t.id,100)||!str(t.title,200)||!str(t.category,40)||!['high','medium','low'].includes(t.priority)||!['queued','progress','done'].includes(t.status)||!str(t.due,10)||!/^\d{4}-\d{2}-\d{2}$/.test(t.due)||!iso(t.createdAt)||(t.completedAt&&!iso(t.completedAt))||(t.deletedAt&&!iso(t.deletedAt))||![0,20,30,40].includes(t.earnedXp)||!Array.isArray(t.events)||t.events.some(e=>!str(e.type,30)||!iso(e.at)))fail();
+    for(const t of value.tasks)if(!str(t.id,100)||!str(t.title,200)||!str(t.category,40)||!['high','medium','low'].includes(t.priority)||!['queued','progress','done'].includes(t.status)||!str(t.due,10)||!/^\d{4}-\d{2}-\d{2}$/.test(t.due)||!iso(t.createdAt)||(t.completedAt&&!iso(t.completedAt))||(t.deletedAt&&!iso(t.deletedAt))||!validXp.has(t.earnedXp)||!Array.isArray(t.events)||t.events.some(e=>!str(e.type,30)||!iso(e.at)))fail();
     for(const r of value.rewards)if(!str(r.id,100)||!str(r.name,80)||!Number.isInteger(r.cost)||r.cost<1||r.cost>100000||!Number.isInteger(r.minutes)||r.minutes<0||r.minutes>1440)fail();
     for(const l of value.ledger)if(!str(l.id,100)||!str(l.label,200)||!iso(l.at)||!Number.isInteger(l.amount)||Math.abs(l.amount)>100000||!['task','reward'].includes(l.type))fail();
     if(balance(value)<0)fail();
     for(const t of value.sessions)if(!str(t.id,100)||!str(t.taskId,100)||!str(t.title,200)||!Number.isInteger(t.seconds)||t.seconds<60||t.seconds>10800||!iso(t.startedAt)||!iso(t.endedAt))fail();
     if(value.timer){const t=value.timer;if(!str(t.id,100)||!str(t.taskId,100)||!str(t.title,200)||!value.tasks.some(v=>v.id===t.taskId&&!v.deletedAt)||!Number.isInteger(t.seconds)||t.seconds<60||t.seconds>10800||!Number.isInteger(t.remaining)||t.remaining<0||t.remaining>t.seconds||!(t.deadline===null||Number.isFinite(t.deadline))||!iso(t.startedAt))fail();}
     const result=migrateCategories(JSON.parse(JSON.stringify(value)));
+    result.tasks.forEach(t=>{if(t.effort===undefined)t.effort='medium';if(!Object.hasOwn(effortFactors,t.effort))fail();});
     if(!Array.isArray(result.categories)||!result.categories.length||result.categories.length>200||result.categories.some(c=>!str(c,40)||!c.trim()||c!==c.trim())||new Set(result.categories.map(c=>c.toLowerCase())).size!==result.categories.length||result.tasks.some(t=>!result.categories.includes(t.category)))fail();
     return result;
   }
-  scope.Quest={uid,now,day,xpFor,initial,balance,xp,saveCategory,deleteCategory,task,status,remove,reward,redeem,range,history,startTimer,remaining,finishTimer,toggleTimer,validate};
+  scope.Quest={uid,now,day,xpFor,effortFactors,initial,balance,xp,saveCategory,deleteCategory,task,status,remove,reward,redeem,range,overdue,reschedule,history,startTimer,remaining,finishTimer,toggleTimer,validate};
 })(typeof module!=='undefined'?module.exports:globalThis);

@@ -58,7 +58,9 @@ def validate(s):
         except (TypeError, ValueError):
             raise ValueError('Invalid task date.')
         require(timestamp(t.get('createdAt')) and (not t.get('completedAt') or timestamp(t['completedAt'])) and (not t.get('deletedAt') or timestamp(t['deletedAt'])))
-        require(type(t.get('earnedXp')) is int and t['earnedXp'] in [0, 20, 30, 40])
+        require(type(t.get('earnedXp')) is int and t['earnedXp'] in [0, 10, 15, 20, 30, 40, 45, 60, 80, 90, 120])
+        require(t.get('effort', 'medium') in ['small', 'medium', 'large', 'epic'])
+        t.setdefault('effort', 'medium')
         require(isinstance(t.get('events'), list) and len(t['events']) <= 50000)
         require(all(isinstance(e, dict) and text(e.get('type'), 30) and timestamp(e.get('at')) for e in t['events']))
     for r in s['rewards']:

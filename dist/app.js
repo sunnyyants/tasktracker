@@ -99,7 +99,9 @@
   function renderTasks(){
     const today=Q.day(),scope=$('#task-scope').value,query=$('#task-search').value.toLowerCase(),cat=$('#task-category').value;
     const daily=state.tasks.filter(t=>!t.deletedAt&&t.due===today),done=daily.filter(t=>t.status==='done').length;
-    $('#daily-label').textContent=daily.length?`${done} of ${daily.length} missions due today cleared · ${state.tasks.filter(t=>t.completedAt&&Q.day(new Date(t.completedAt))===today).length} completions today`:'A clear runway. Add a mission to start earning XP.';
+    const results=Q.metrics(state,today,'day');
+    $('#daily-completed').textContent=results.completed;$('#daily-xp').textContent=results.earnedXp;$('#daily-focus').textContent=results.focusMinutes.toLocaleString(undefined,{maximumFractionDigits:1});
+    $('#daily-label').textContent=daily.length?`${done} of ${daily.length} missions due today cleared · ${results.completed} first completions today`:'A clear runway. Add a mission to start earning XP.';
     $('#daily-progress').max=daily.length||1;$('#daily-progress').value=done;
     let rows=state.tasks.filter(t=>!t.deletedAt&&(scope==='done'?t.status==='done':t.status!=='done')&&(scope!=='today'||t.due===today)&&(scope!=='overdue'||t.due<today)&&(!cat||cat===t.category)&&(t.title+' '+t.category).toLowerCase().includes(query));
     const rank={high:0,medium:1,low:2};rows.sort((a,b)=>rank[a.priority]-rank[b.priority]||a.due.localeCompare(b.due)||a.createdAt.localeCompare(b.createdAt));
@@ -156,10 +158,18 @@
     $('#metric-focus-detail').textContent=`${m.sessionCount} completed focus session${m.sessionCount===1?'':'s'}`;
     $('#metric-overdue').textContent=m.overdue;
     $('#metric-overdue-detail').textContent=m.future?'No actual carryover yet':m.partial?'Overdue and unfinished right now':'Overdue and unfinished at period end';
-    $('#metrics-trend-title').textContent=period==='week'?'Daily output this week':'Daily output · trailing 7 days';
-    const max=Math.max(1,...m.trend.map(v=>v.completed));
-    $('#metrics-trend').innerHTML=m.trend.map(v=>`<div class="metrics-bar ${v.future?'is-future':''}"><span>${label(v.date)}</span><progress max="${max}" value="${v.completed}" aria-label="${esc(v.date)}: ${v.completed} first completions"></progress><span>${v.future?'—':v.completed}</span></div>`).join('');
-    $('#metrics-trend').setAttribute('aria-label',m.trend.map(v=>`${v.date}: ${v.future?'future':v.completed+' tasks'}`).join('; '));
+    $('#on-time-arc').setAttribute('stroke-dasharray',`${m.onTimeRate??0} ${100-(m.onTimeRate??0)}`);
+    $('#metrics-trend-title').textContent=period==='week'?'This week at a glance':'Trailing seven-day trends';
+    const compact=v=>v.toLocaleString(undefined,{notation:'compact',maximumFractionDigits:1});
+    const charts=[{key:'completed',title:'Completed tasks',unit:'tasks'},{key:'earnedXp',title:'XP earned',unit:'XP'},{key:'focusMinutes',title:'Focus time',unit:'minutes'}];
+    $('#metrics-trend').innerHTML=charts.map(chart=>{
+      const actualMax=Math.max(...m.trend.map(v=>v[chart.key])),max=actualMax||1;
+      const summary=m.trend.map(v=>`${v.date}: ${v.future?'upcoming':v[chart.key]+' '+chart.unit}`).join('; ');
+      return `<figure class="trend-chart"><figcaption><h3>${chart.title}</h3><span class="small">${actualMax?'0–'+compact(max)+' '+chart.unit:'No activity recorded'}</span></figcaption><div class="trend-columns" role="img" aria-label="${esc(chart.title+': '+summary)}">${m.trend.map(v=>{
+        const height=v[chart.key]/max*100,weekday=new Date(v.date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short'});
+        return `<div class="trend-column ${v.future?'is-future':''}"><span class="bar-value">${v.future?'—':compact(v[chart.key])}</span><svg class="trend-mark" viewBox="0 0 30 100" preserveAspectRatio="none" aria-hidden="true"><rect class="bar-track" x="4" y="0" width="22" height="100"/><rect class="bar-fill" x="4" y="${100-height}" width="22" height="${height}" rx="1"/></svg><span class="bar-day" title="${esc(v.date)}">${esc(weekday)}</span></div>`;
+      }).join('')}</div><p class="small">${label(m.trend[0].date)} – ${label(m.trend[6].date)}</p></figure>`;
+    }).join('');
   }
   $$('.metrics-filters input,.metrics-filters select').forEach(el=>el.addEventListener('input',()=>{if($('#metrics-date').value&&$('#metrics-date').checkValidity())renderMetrics();}));
   $('#metrics-date').value=Q.day();

@@ -97,6 +97,8 @@ test('daily and weekly metrics use first completions, actual XP and completed fo
   const daily=Q.metrics(s,'2026-11-03','day','Work',new Date('2026-11-03T12:00:00'));
   assert.equal(daily.completed,1);assert.equal(daily.earnedXp,60);assert.equal(daily.onTimeRate,0);assert.equal(daily.focusMinutes,50);
   assert.equal(m.trend.reduce((sum,v)=>sum+v.completed,0),2);assert.equal(m.trend[0].date,'2026-11-02');assert.equal(m.trend[6].date,'2026-11-08');
+  assert.equal(m.trend.reduce((sum,v)=>sum+v.earnedXp,0),m.earnedXp);assert.equal(m.trend.reduce((sum,v)=>sum+v.focusMinutes,0),m.focusMinutes);
+  assert.equal(m.trend[0].earnedXp,20);assert.equal(m.trend[1].earnedXp,60);assert.equal(m.trend[0].focusMinutes,25);assert.equal(m.trend[1].focusMinutes,50);
 });
 test('historical carryover reconstructs the due date, deletion and status at the cutoff',()=>{
   const s=Q.initial(),t=metricTask(s,{due:'2026-11-10',finished:'2026-11-04'});
@@ -113,4 +115,5 @@ test('timely replanning remains on time, while future and empty periods have no 
   const m=Q.metrics(s,'2026-11-03','day','',new Date('2026-11-03T10:00:00'));assert.equal(m.completed,1);assert.equal(m.onTimeRate,100);
   const future=Q.metrics(s,'2026-11-10','day','',new Date('2026-11-03T12:00:00'));assert.equal(future.future,true);assert.equal(future.onTimeRate,null);assert.equal(future.earnedXp,0);assert.equal(future.overdue,0);
   const empty=Q.metrics(s,'2026-11-03','day','Missing',new Date('2026-11-03T12:00:00'));assert.equal(empty.completed,0);assert.equal(empty.onTimeRate,null);assert.equal(empty.focusMinutes,0);
+  assert.ok(empty.trend.every(v=>v.earnedXp===0&&v.focusMinutes===0&&v.completed===0));
 });

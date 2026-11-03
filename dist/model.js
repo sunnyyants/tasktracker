@@ -154,7 +154,9 @@
       const from=new Date(chartStart);from.setDate(from.getDate()+i);const to=new Date(from);to.setDate(to.getDate()+1);
       const activeUntil=Math.min(+to,+asOf+1);
       const done=completions.filter(c=>c.at&&+new Date(c.at)>=+from&&+new Date(c.at)<activeUntil);
-      trend.push({date:day(from),completed:done.length,future:+from>+asOf});
+      const awarded=completions.filter(c=>c.xpAt&&+new Date(c.xpAt)>=+from&&+new Date(c.xpAt)<activeUntil).reduce((sum,c)=>sum+c.task.earnedXp,0);
+      const minutes=s.sessions.filter(t=>+new Date(t.endedAt)>=+from&&+new Date(t.endedAt)<activeUntil&&(!category||byId.get(t.taskId)?.category===category)).reduce((sum,t)=>sum+t.seconds/60,0);
+      trend.push({date:day(from),completed:done.length,earnedXp:awarded,focusMinutes:minutes,future:+from>+asOf});
     }
     return {start:day(start),end:day(new Date(+end-1)),partial:+start<=+asOf&&+end>+asOf,future:+start>+asOf,completed:finished.length,onTime,onTimeRate:finished.length?Math.round(onTime/finished.length*100):null,earnedXp,focusMinutes,sessionCount:sessions.length,overdue:overdueAtCutoff,trend};
   }

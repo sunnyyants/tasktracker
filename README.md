@@ -39,7 +39,9 @@ Open **Efficiency metrics** in the sidebar. Select Daily or Weekly, a reference 
 - Focus minutes: durations of completed focus sessions; incomplete/reset sessions, estimates, and browser-open time are excluded.
 - Overdue carryover: unfinished, non-deleted overdue tasks at a historical period's end, or now for the current period. Task status and due-date changes are replayed from available activity history.
 
-The seven-day output chart shows first completions per day. Weekly reports run Monday–Sunday; daily reports show a trailing seven-day chart. Current periods are labeled “So far.” Dates follow the viewing machine's local timezone; use the same timezone across devices for identical day boundaries. Filters use current category assignments. Legacy records without detailed activity history use their stored values as a fallback. Metrics are derived from existing records and do not require a database migration. No late-reward penalty is enabled by this feature.
+Daily Operations includes today's first completions, XP earned and completed focus minutes alongside its existing due-today progress bar. These totals cover all categories, independent of the task-list filters. A link opens the full efficiency report.
+
+The dashboard has an on-time percentage ring and three seven-day bar charts: first completions, XP earned, and completed focus minutes. Charts use the same dates but separate, labeled scales and units; zero-activity periods do not invent values and upcoming dates show a dash. Weekly reports run Monday–Sunday; daily reports show trailing seven-day charts. Current periods are labeled “So far.” Dates follow the viewing machine's local timezone; use the same timezone across devices for identical day boundaries. Filters use current category assignments. Legacy records without detailed activity history use their stored values as a fallback. Metrics are derived from existing records and do not require a database migration. No late-reward penalty is enabled by this feature.
 
 ## Mac mini: one shared SQLite workspace
 

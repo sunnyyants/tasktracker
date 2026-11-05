@@ -24,7 +24,7 @@
     });
   }
   function initial() {
-    return {version:1,categories:['Work','Design','Deep work','Admin'],categoryWeights:{},tasks:[],rewards:[{id:uid(),name:'Coffee break',cost:50,minutes:10},{id:uid(),name:'Game time',cost:100,minutes:30},{id:uid(),name:'Off-grid reset',cost:30,minutes:15}],ledger:[],sessions:[],timer:null};
+    return {version:1,categories:['Work','Design','Deep work','Admin'],categoryWeights:{},dailyPlans:[],tasks:[],rewards:[{id:uid(),name:'Coffee break',cost:50,minutes:10},{id:uid(),name:'Game time',cost:100,minutes:30},{id:uid(),name:'Off-grid reset',cost:30,minutes:15}],ledger:[],sessions:[],timer:null};
   }
   const balance = s => s.ledger.reduce((v,t)=>v+t.amount,0);
   const xp = s => s.tasks.reduce((v,t)=>v+(t.earnedXp||0),0);
@@ -199,6 +199,31 @@
     if(finishTimer(s))return;
     if(s.timer.deadline){s.timer.remaining=remaining(s);s.timer.deadline=null;}else{s.timer.deadline=Date.now()+s.timer.remaining*1000;}
   }
+  const validDay = date => typeof date==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(date)&&Number.isFinite(+new Date(date+'T12:00:00'))&&day(new Date(date+'T12:00:00'))===date;
+  function savePlan(s,date,mainTaskId,supportTaskIds=[]) {
+    if(!validDay(date)||!Array.isArray(supportTaskIds)||supportTaskIds.length>2||new Set([mainTaskId,...supportTaskIds]).size!==1+supportTaskIds.length)throw Error('Choose one main mission and up to two different supporting tasks.');
+    const previous=(s.dailyPlans||[]).find(p=>p.date===date);
+    for(const id of [mainTaskId,...supportTaskIds]){
+      const task=s.tasks.find(t=>t.id===id&&!t.deletedAt);
+      if(!task||(task.status==='done'&&![previous?.mainTaskId,...(previous?.supportTaskIds||[])].includes(id)))throw Error('Choose active tasks for your daily plan.');
+    }
+    const plan={date,mainTaskId,supportTaskIds:[...supportTaskIds],reflection:previous?.reflection||'',reviewedAt:previous?.reviewedAt||null,updatedAt:now()};
+    s.dailyPlans=s.dailyPlans||[];
+    if(!previous&&s.dailyPlans.length>=10000)throw Error('Daily plan storage is full. Export a backup before continuing.');
+    s.dailyPlans=s.dailyPlans.filter(p=>p.date!==date);s.dailyPlans.push(plan);return plan;
+  }
+  function reviewDay(s,date,reflection) {
+    const plan=(s.dailyPlans||[]).find(p=>p.date===date);
+    if(!plan)throw Error('Save a daily plan before writing a reflection.');
+    if(typeof reflection!=='string'||reflection.trim().length>1000)throw Error('Keep your reflection within 1,000 characters.');
+    plan.reflection=reflection.trim();plan.reviewedAt=now();plan.updatedAt=now();return plan;
+  }
+  function startSmallStep(s,id,step) {
+    if(s.timer)throw Error('Finish or reset the current focus session first.');
+    if(typeof step!=='string'||!step.trim()||step.trim().length>300)throw Error('Write a first step within 300 characters.');
+    startTimer(s,id,10);s.timer.firstStep=step.trim();
+    s.tasks.find(t=>t.id===id).events.push({type:'first_step',step:step.trim(),at:now()});
+  }
   function validate(value) {
     const fail=()=>{throw Error('This file is not a valid QUEST//OS v1 backup.');};
     if(!value||value.version!==1||!['tasks','rewards','ledger','sessions'].every(k=>Array.isArray(value[k])&&value[k].length<=50000))fail();
@@ -217,7 +242,13 @@
     result.tasks.forEach(t=>{if(t.categories===undefined)t.categories=[t.category];if(!Array.isArray(t.categories)||!t.categories.length||t.categories.length>200||new Set(t.categories).size!==t.categories.length||t.categories.some(c=>!result.categories.includes(c)))fail();t.category=t.categories[0];});
     if(result.categoryWeights===undefined)result.categoryWeights={};
     if(!result.categoryWeights||typeof result.categoryWeights!=='object'||Array.isArray(result.categoryWeights)||Object.entries(result.categoryWeights).some(([name,weight])=>!result.categories.includes(name)||!validWeight(weight)))fail();
+    if(result.dailyPlans===undefined)result.dailyPlans=[];
+    if(!Array.isArray(result.dailyPlans)||result.dailyPlans.length>10000||new Set(result.dailyPlans.map(p=>p?.date)).size!==result.dailyPlans.length)fail();
+    for(const p of result.dailyPlans){
+      if(!p||!validDay(p.date)||!str(p.mainTaskId,100)||!Array.isArray(p.supportTaskIds)||p.supportTaskIds.length>2||new Set([p.mainTaskId,...p.supportTaskIds]).size!==p.supportTaskIds.length+1||[p.mainTaskId,...p.supportTaskIds].some(id=>!result.tasks.some(t=>t.id===id))||!str(p.reflection,1000)||!(p.reviewedAt===null||iso(p.reviewedAt))||!iso(p.updatedAt))fail();
+    }
+    if(result.timer?.firstStep!==undefined&&!str(result.timer.firstStep,300))fail();
     return result;
   }
-  scope.Quest={uid,now,day,xpFor,effortFactors,effortMinutes,taskCategories,hasCategory,categoryWeight,taskWeight,taskXp,roiFor,sortTasks,initial,balance,xp,saveCategory,deleteCategory,task,status,remove,reward,redeem,range,overdue,reschedule,history,metrics,startTimer,remaining,finishTimer,toggleTimer,validate};
+  scope.Quest={savePlan,reviewDay,startSmallStep,uid,now,day,xpFor,effortFactors,effortMinutes,taskCategories,hasCategory,categoryWeight,taskWeight,taskXp,roiFor,sortTasks,initial,balance,xp,saveCategory,deleteCategory,task,status,remove,reward,redeem,range,overdue,reschedule,history,metrics,startTimer,remaining,finishTimer,toggleTimer,validate};
 })(typeof module!=='undefined'?module.exports:globalThis);

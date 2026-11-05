@@ -7,10 +7,10 @@
   const icon=name=>`<svg aria-hidden="true"><use href="#i-${name}"/></svg>`;
   const stamp=v=>v?new Date(v).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'—';
   const shared=!!globalThis.QUEST_SERVER?.enabled;
-  const needsServerUpdate=shared&&globalThis.QUEST_SERVER.categoryWeights!==true;
+  const needsServerUpdate=shared&&globalThis.QUEST_SERVER.dailyCompanion!==true;
   function serverCompatibility(){
     $('#storage-error').hidden=!needsServerUpdate;
-    if(needsServerUpdate)$('#storage-error').textContent='Restart the updated server.py and reload this page before saving multi-category weights.';
+    if(needsServerUpdate)$('#storage-error').textContent='Restart the updated server.py and reload this page before saving daily plans.';
   }
   async function request(url,options={}){
     const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),6000);
@@ -69,7 +69,7 @@
       if(!shared&&localStorage.getItem(KEY)!==storedRaw)throw Error('Another tab changed your data. Reload this tab before continuing.');
       fn();const next=JSON.stringify(state);
       if(shared){
-        const response=await request('api/state',{method:'PUT',headers:{'Content-Type':'application/json','If-Match':'"'+revision+'"','X-Quest-Schema':'category-weights-v1'},body:next});
+        const response=await request('api/state',{method:'PUT',headers:{'Content-Type':'application/json','If-Match':'"'+revision+'"','X-Quest-Schema':'daily-companion-v1'},body:next});
         if(response.status===409){state=JSON.parse(before);await refreshShared(true);notify('Another device saved first. Your change was not applied; review the latest data and try again.');return false;}
         if(!response.ok)throw Error((await response.json()).error||'Could not save to the shared database.');
         const data=await response.json();state=Q.validate(data.state);revision=data.revision;
@@ -117,7 +117,7 @@
     $('#balance').textContent=Q.balance(state);$('#level').textContent=String(level).padStart(2,'0');$('#xp-label').textContent=`LEVEL ${level} · ${xp%200} / 200 XP`;$('#xp').value=xp%200;
     $('#today-label').textContent=new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}).toUpperCase();
     selectCategories('#task-category');selectCategories('#history-category');selectCategories('#metrics-category');renderCategories();
-    renderRewards();renderTasks();renderHistory();renderTimer();renderOverdue();renderMetrics();
+    renderRewards();renderTasks();renderHistory();renderTimer();renderOverdue();renderMetrics();renderCompanion();
     $('#data-stats').textContent=`${state.tasks.length} tasks · ${state.rewards.length} rewards · ${state.sessions.length} focus sessions · ${state.ledger.length} credit transactions`;
     $('#export').disabled=shared&&revision===null;
   }
@@ -135,7 +135,7 @@
   const effortLabel={small:'Small',medium:'Medium',large:'Large',epic:'Major'};
   const statusLabel={queued:'Queued',progress:'In progress',done:'Completed'};
   function taskCard(t){
-    return `<article class="task-card ${t.status==='done'?'done':''} ${t.due<Q.day()&&t.status!=='done'?'is-overdue':''}"><input type="checkbox" data-complete="${esc(t.id)}" aria-label="Complete ${esc(t.title)}" ${t.status==='done'?'checked':''}><div class="task-main"><strong>${esc(t.title)}</strong>${t.due<Q.day()&&t.status!=='done'?'<span class="overdue-tag">OVERDUE</span>':''}<div class="task-meta"><span>${icon('tag')} ${esc(categoryNames(t))}</span><span>${esc(effortLabel[t.effort])} effort</span><span class="roi-estimate" title="Estimated available XP per hour, based on effort">${t.earnedXp?'Already rewarded':'≈'+Q.roiFor(t,state).toLocaleString(undefined,{maximumFractionDigits:1})+' XP/h'}</span><span class="priority ${t.priority}">${t.priority==='high'?'↑↑':t.priority==='medium'?'↑':'↓'} ${t.priority}</span><span class="${t.due<Q.day()&&t.status!=='done'?'overdue':''}">${esc(t.due)}${t.due<Q.day()&&t.status!=='done'?' · OVERDUE':''}</span><span class="xp-reward">${t.earnedXp?'✓ '+t.earnedXp:'+'+Q.taskXp(state,t)} XP</span></div></div><div class="task-actions"><select class="task-status" data-status="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v}</option>`).join('')}</select><div class="task-tools">${t.status!=='done'?`<button data-focus="${esc(t.id)}" aria-label="Focus on ${esc(t.title)}">${icon('timer')}</button>`:''}<button data-edit-task="${esc(t.id)}" aria-label="Edit ${esc(t.title)}">${icon('edit')}</button><button data-delete-task="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">${icon('trash')}</button></div></div></article>`;
+    return `<article class="task-card ${t.status==='done'?'done':''} ${t.due<Q.day()&&t.status!=='done'?'is-overdue':''}"><input type="checkbox" data-complete="${esc(t.id)}" aria-label="Complete ${esc(t.title)}" ${t.status==='done'?'checked':''}><div class="task-main"><strong>${esc(t.title)}</strong>${t.due<Q.day()&&t.status!=='done'?'<span class="overdue-tag">OVERDUE</span>':''}<div class="task-meta"><span>${icon('tag')} ${esc(categoryNames(t))}</span><span>${esc(effortLabel[t.effort])} effort</span><span class="roi-estimate" title="Estimated available XP per hour, based on effort">${t.earnedXp?'Already rewarded':'≈'+Q.roiFor(t,state).toLocaleString(undefined,{maximumFractionDigits:1})+' XP/h'}</span><span class="priority ${t.priority}">${t.priority==='high'?'↑↑':t.priority==='medium'?'↑':'↓'} ${t.priority}</span><span class="${t.due<Q.day()&&t.status!=='done'?'overdue':''}">${esc(t.due)}${t.due<Q.day()&&t.status!=='done'?' · OVERDUE':''}</span><span class="xp-reward">${t.earnedXp?'✓ '+t.earnedXp:'+'+Q.taskXp(state,t)} XP</span></div></div><div class="task-actions"><select class="task-status" data-status="${esc(t.id)}" aria-label="Status of ${esc(t.title)}">${Object.entries(statusLabel).map(([k,v])=>`<option value="${k}" ${t.status===k?'selected':''}>${v}</option>`).join('')}</select><div class="task-tools">${t.status!=='done'?`<button data-small-step="${esc(t.id)}" aria-label="Help me start ${esc(t.title)}">${icon('bolt')}</button><button data-focus="${esc(t.id)}" aria-label="Focus on ${esc(t.title)}">${icon('timer')}</button>`:''}<button data-edit-task="${esc(t.id)}" aria-label="Edit ${esc(t.title)}">${icon('edit')}</button><button data-delete-task="${esc(t.id)}" aria-label="Delete ${esc(t.title)}">${icon('trash')}</button></div></div></article>`;
   }
   function renderTasks(){
     const today=Q.day(),scope=$('#task-scope').value,query=$('#task-search').value.toLowerCase(),cat=$('#task-category').value;
@@ -160,6 +160,55 @@
     $$('#task-list details').forEach(d=>d.addEventListener('toggle',()=>{prefs.collapsed[d.dataset.group]=!d.open;preferences();}));
     $$('[data-layout]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.layout===prefs.layout)));$('#group-by').value=prefs.group;$('#compact').checked=prefs.compact;
   }
+  function renderCompanion(){
+    const plan=(state.dailyPlans||[]).find(p=>p.date===Q.day());
+    const ids=plan?[plan.mainTaskId,...plan.supportTaskIds]:[];
+    const items=ids.map(id=>state.tasks.find(t=>t.id===id)).filter(Boolean);
+    const done=items.filter(t=>t.status==='done'&&!t.deletedAt).length;
+    $('#briefing-status').textContent=plan?`${done} / ${items.length} planned missions cleared`:'One main mission. Two supporting tasks. A clear place to start.';
+    $('#briefing-tasks').innerHTML=items.length?items.map((t,i)=>`<article class="briefing-task ${t.status==='done'?'cleared':''}"><span class="eyebrow">${i?'SUPPORT':'MAIN MISSION'} · ${t.deletedAt?'Archived':statusLabel[t.status]}</span><h3>${esc(t.title)}</h3><p class="small">${t.priority} priority · due ${esc(t.due)}${t.due<Q.day()&&t.status!=='done'&&!t.deletedAt?' · Overdue':''}</p>${!t.deletedAt&&t.status!=='done'?`<button data-small-step="${esc(t.id)}">${icon('bolt')}Help me start</button>`:''}</article>`).join(''):'<p class="small">Choose what matters today. Planning does not change task deadlines or award XP.</p>';
+    $('#plan-open').textContent=plan?'Adjust today’s plan':'Plan my day';
+    $('#debrief-open').disabled=!(state.dailyPlans||[]).length;
+    if($('#debrief-dialog').open)showDebrief($('#debrief-date').value,false);
+    $('#briefing-review').textContent=plan?.reviewedAt?'Reflection saved · '+stamp(plan.reviewedAt):'A missed task is a chance to revise the plan. Come back for a short debrief.';
+  }
+  $('#plan-open').onclick=()=>{
+    const plan=(state.dailyPlans||[]).find(p=>p.date===Q.day()),ids=plan?[plan.mainTaskId,...plan.supportTaskIds]:[];
+    const active=Q.sortTasks(state.tasks.filter(t=>!t.deletedAt&&(t.status!=='done'||ids.includes(t.id))),'roi',Q.day(),state);
+    const options='<option value="">Choose a mission</option>'+active.map(t=>`<option value="${esc(t.id)}">${esc(t.title)} · ${t.priority} · ${esc(t.due)}</option>`).join('');
+    ['#plan-main','#plan-support-one','#plan-support-two'].forEach((id,i)=>{$(id).innerHTML=options;$(id).value=ids[i]||'';});
+    $('#plan-empty').hidden=!!active.length;$('#plan-save').disabled=!active.length;$('#plan-dialog').showModal();
+  };
+  $('#plan-form').onsubmit=async e=>{
+    e.preventDefault();const date=Q.day();
+    if(await change(()=>Q.savePlan(state,date,$('#plan-main').value,[$('#plan-support-one').value,$('#plan-support-two').value].filter(Boolean)),'Daily plan saved. Start small; keep moving.'))$('#plan-dialog').close();
+  };
+  function openSmallStep(id){
+    const task=state.tasks.find(t=>t.id===id&&!t.deletedAt&&t.status!=='done');if(!task){notify('Choose an active mission.');return;}
+    if(state.timer){notify('Finish or reset your current focus session first.');return;}
+    $('#step-task-id').value=id;$('#step-task-name').textContent=task.title;
+    const title=task.title.toLowerCase();
+    $('#step-text').value=/presentation|slides|deck/.test(title)?'Open the slides and outline three key points.':/report|document|write|draft/.test(title)?'Open the document and write three rough headings.':/review|pull request/.test(title)?'Open the first item and note one question or improvement.':/code|build|implement|fix/.test(title)?'Open the relevant file and describe the smallest change to make.':'Open the materials for this mission and list three concrete next actions.';
+    $('#step-dialog').showModal();
+  }
+  $('#step-form').onsubmit=async e=>{
+    e.preventDefault();if(await change(()=>Q.startSmallStep(state,$('#step-task-id').value,$('#step-text').value),'Ten-minute session started. Just take the first step.')){
+      $('#step-dialog').close();prefs.timerFolded=false;preferences();renderTimer();$('.timer-panel').scrollIntoView({behavior:'smooth',block:'center'});
+    }
+  };
+  function showDebrief(date,loadNote=true){
+    const plan=(state.dailyPlans||[]).find(p=>p.date===date);if(!plan)return;
+    const m=Q.metrics(state,date,'day'),ids=[plan.mainTaskId,...plan.supportTaskIds],tasks=ids.map(id=>state.tasks.find(t=>t.id===id)).filter(Boolean);
+    $('#debrief-summary').textContent=`${m.completed} first completion${m.completed===1?'':'s'} · ${m.earnedXp} XP · ${Math.round(m.focusMinutes)} focus minutes`;
+    if(loadNote)$('#debrief-note').value=plan.reflection;
+    $('#debrief-tasks').innerHTML=tasks.map(t=>`<div class="list-line"><div><strong>${esc(t.title)}</strong><p>${t.deletedAt?'Archived':statusLabel[t.status]} · due ${esc(t.due)}</p></div>${!t.deletedAt&&t.status!=='done'?`<button data-edit-task="${esc(t.id)}">Revise task / date</button>`:''}</div>`).join('');
+  }
+  $('#debrief-open').onclick=()=>{
+    $('#debrief-date').innerHTML=(state.dailyPlans||[]).slice().sort((a,b)=>b.date.localeCompare(a.date)).map(p=>`<option value="${p.date}">${p.date}${p.reviewedAt?' · Reviewed':''}</option>`).join('');
+    const date=(state.dailyPlans||[]).some(p=>p.date===Q.day())?Q.day():$('#debrief-date').value;$('#debrief-date').value=date;showDebrief(date);$('#debrief-dialog').showModal();
+  };
+  $('#debrief-date').onchange=()=>showDebrief($('#debrief-date').value);
+  $('#debrief-form').onsubmit=async e=>{e.preventDefault();if(await change(()=>Q.reviewDay(state,$('#debrief-date').value,$('#debrief-note').value),'Reflection saved. Tomorrow is a fresh plan.'))$('#debrief-dialog').close();};
   function renderOverdue(){
     const tasks=Q.overdue(state);$('#overdue-banner').hidden=!tasks.length;
     $('#overdue-count').textContent=`${tasks.length} overdue mission${tasks.length===1?'':'s'} need${tasks.length===1?'s':''} a new plan`;
@@ -173,7 +222,7 @@
     const f=historyFilters(),rows=Q.history(state,f),size=30,pages=Math.max(1,Math.ceil(rows.length/size));historyPage=Math.min(historyPage,pages-1);
     const [start,end]=Q.range(f.date,f.period);const last=new Date(+end-1);
     $('#history-summary').textContent=`${start.toLocaleDateString()} – ${last.toLocaleDateString()} · ${rows.length} matching tasks`;
-    $('#history-list').innerHTML=rows.slice(historyPage*size,(historyPage+1)*size).map(t=>`<article class="history-card"><div class="between"><h3>${esc(t.title)}</h3><span class="small">${t.deletedAt?'Deleted':statusLabel[t.status]}</span></div><p class="small">${esc(categoryNames(t))} · ${t.priority} · ${esc(effortLabel[t.effort])} effort · due ${esc(t.due)} · ${t.earnedXp} XP earned</p><p class="small">Created ${stamp(t.createdAt)} · Completed ${stamp(t.completedAt)}</p><details><summary>Activity history (${t.events.length})</summary><ul>${t.events.map(e=>`<li>${esc(e.type)}${e.type==='category_changed'?' · '+esc(e.from)+' → '+esc(e.to):e.type==='rescheduled'?' · '+esc(e.fromDue)+' → '+esc(e.toDue)+' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):e.type==='reprioritized'?' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):''} · ${stamp(e.at)}</li>`).join('')}</ul></details>${!t.deletedAt?`<button class="icon-button" data-edit-task="${esc(t.id)}">${icon('edit')}Edit mission</button>`:''}</article>`).join('')||'<div class="empty">No tasks match this period and filters.</div>';
+    $('#history-list').innerHTML=rows.slice(historyPage*size,(historyPage+1)*size).map(t=>`<article class="history-card"><div class="between"><h3>${esc(t.title)}</h3><span class="small">${t.deletedAt?'Deleted':statusLabel[t.status]}</span></div><p class="small">${esc(categoryNames(t))} · ${t.priority} · ${esc(effortLabel[t.effort])} effort · due ${esc(t.due)} · ${t.earnedXp} XP earned</p><p class="small">Created ${stamp(t.createdAt)} · Completed ${stamp(t.completedAt)}</p><details><summary>Activity history (${t.events.length})</summary><ul>${t.events.map(e=>`<li>${esc(e.type)}${e.type==='category_changed'?' · '+esc(e.from)+' → '+esc(e.to):e.type==='rescheduled'?' · '+esc(e.fromDue)+' → '+esc(e.toDue)+' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):e.type==='reprioritized'?' · '+esc(e.fromPriority)+' → '+esc(e.toPriority):e.type==='first_step'?' · '+esc(e.step):''} · ${stamp(e.at)}</li>`).join('')}</ul></details>${!t.deletedAt?`<button class="icon-button" data-edit-task="${esc(t.id)}">${icon('edit')}Edit mission</button>`:''}</article>`).join('')||'<div class="empty">No tasks match this period and filters.</div>';
     if(pages>1)$('#history-list').insertAdjacentHTML('beforeend',`<div class="pager"><button data-history-page="-1" ${historyPage===0?'disabled':''}>← Previous</button><span>Page ${historyPage+1} / ${pages}</span><button data-history-page="1" ${historyPage===pages-1?'disabled':''}>Next →</button></div>`);
     const sessions=state.sessions.filter(t=>new Date(t.endedAt)>=start&&new Date(t.endedAt)<end&&(!f.category||Q.hasCategory(state.tasks.find(v=>v.id===t.taskId),f.category))&&t.title.toLowerCase().includes(f.query.toLowerCase())).slice().reverse();
     $('#sessions').innerHTML=sessions.map(t=>`<div class="list-line"><div>${esc(t.title)}<p>${stamp(t.endedAt)}</p></div><span>${Math.round(t.seconds/60)} min</span></div>`).join('')||'<p class="small">No completed focus sessions in this period.</p>';
@@ -184,12 +233,13 @@
     if(state.timer&&!active.some(t=>t.id===state.timer.taskId))active.push({id:state.timer.taskId,title:state.timer.title});
     $('#timer-task').innerHTML=active.map(t=>`<option value="${esc(t.id)}">${esc(t.title)}</option>`).join('')||'<option value="">Add an active mission first</option>';
     if(active.some(t=>t.id===selected))$('#timer-task').value=selected;
-    const locked=!!state.timer;$('#timer-task').disabled=locked;$('#timer-minutes').disabled=locked;
+    const locked=!!state.timer;$('#timer-minutes').value=locked?state.timer.seconds/60:selectedMinutes;$('#timer-task').disabled=locked;$('#timer-minutes').disabled=locked;
     $$('[data-minutes]').forEach(b=>{b.disabled=locked;b.setAttribute('aria-pressed',String(Number(b.dataset.minutes)===(locked?state.timer.seconds/60:selectedMinutes)));});
     $('#timer-start').disabled=!active.length;$('#timer-reset').disabled=!locked;
     $('#timer-start').textContent=locked?(state.timer.deadline?'Ⅱ Pause':'▶ Resume'):'▶ Start focus';
     $('#timer-status').textContent=locked?(state.timer.deadline?'Focus session active':'Paused'):'Ready';
     $('.timer-panel').classList.toggle('folded',!!prefs.timerFolded);$('#timer-fold').textContent=prefs.timerFolded?'Expand timer':'Collapse timer';$('#timer-fold').setAttribute('aria-expanded',String(!prefs.timerFolded));
+    $('#timer-first-step').textContent=state.timer?.firstStep?'First step: '+state.timer.firstStep:'';
     tickClock();
   }
   function renderMetrics(){
@@ -271,6 +321,7 @@
       $('#category-move-label').hidden=!orphans;
       $('#category-delete-dialog').showModal();
     }
+    if(b.dataset.smallStep)openSmallStep(b.dataset.smallStep);
     if(b.dataset.editTask)openTask(b.dataset.editTask);
     if(b.dataset.editReward)openReward(b.dataset.editReward);
     if(b.dataset.deleteTask)confirmation('Delete this mission?','It will leave the mission queue. Its history and previously earned XP and credits are preserved.',()=>change(()=>Q.remove(state,b.dataset.deleteTask),'Mission deleted; history kept.'));
@@ -302,7 +353,7 @@
   };
   $('#timer-reset').onclick=()=>confirmation('Reset this focus session?','The current session will be discarded. Completed sessions stay in history.',()=>change(()=>{state.timer=null;},'Timer reset.'));
   $('#timer-fold').onclick=()=>{prefs.timerFolded=!prefs.timerFolded;preferences();renderTimer();};
-  setInterval(()=>{if(!saving&&state.timer?.deadline&&Q.remaining(state)===0){change(()=>Q.finishTimer(state),'Focus session complete. Take a break!');}else tickClock();if($('#today-label').dataset.date!==Q.day()){$('#today-label').dataset.date=Q.day();renderTasks();renderOverdue();renderMetrics();}},1000);
+  setInterval(()=>{if(!saving&&state.timer?.deadline&&Q.remaining(state)===0){change(()=>Q.finishTimer(state),'Focus session complete. Take a break!');}else tickClock();if($('#today-label').dataset.date!==Q.day()){$('#today-label').dataset.date=Q.day();render();}},1000);
   function route(){currentPage=['missions','history','metrics','rewards','data'].includes(location.hash.slice(1))?location.hash.slice(1):'missions';$$('.page').forEach(p=>p.hidden=p.id!==currentPage+'-page');$$('nav a').forEach(a=>{if(a.dataset.page===currentPage)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});const titles={metrics:['Your progress, measured.','Review your daily output, focus and delivery.'],missions:['Your next objective.','Lock in. Clear your missions. Upgrade your day.'],history:['Your mission archive.','Every step forward leaves a trace.'],rewards:['Work hard. Recharge well.','Build a reward system that works for you.'],data:['Take your progress anywhere.','Simple files. Your data. No lock-in.']};$('#page-title').textContent=titles[currentPage][0];$('#page-subtitle').textContent=titles[currentPage][1];if(currentPage==='metrics')renderMetrics();}
   window.addEventListener('hashchange',route);
   window.addEventListener('storage',e=>{if(shared||e.key!==KEY)return;try{if(!e.newValue)throw Error('Saved data was removed in another tab.');state=Q.validate(JSON.parse(e.newValue));storedRaw=e.newValue;render();notify('Updated from another tab.');}catch{notify('Data changed in another tab. Reload before editing.');}});

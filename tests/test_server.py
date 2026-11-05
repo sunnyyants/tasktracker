@@ -15,6 +15,25 @@ spec.loader.exec_module(server_module)
 
 
 class StoreTests(unittest.TestCase):
+    def test_daily_plans_survive_sqlite_and_legacy_state_migrates(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / 'daily.sqlite3'
+            store = server_module.Store(path)
+            state = store.read()['state']
+            task = dict(id='main', title='Write report', category='Work', categories=['Work'], priority='high', effort='medium', status='queued', due='2026-11-04', createdAt='2026-11-04T08:00:00Z', completedAt=None, deletedAt=None, earnedXp=0, events=[])
+            state['tasks'] = [task]
+            plan = dict(date='2026-11-04', mainTaskId='main', supportTaskIds=[], reflection='A small first step helped.', reviewedAt='2026-11-04T20:00:00Z', updatedAt='2026-11-04T20:00:00Z')
+            state['dailyPlans'] = [plan]
+            store.write(1, state)
+            self.assertEqual(server_module.Store(path).read()['state']['dailyPlans'], [plan])
+            for mutation in [dict(date='2026-02-30'), dict(mainTaskId='missing'), dict(supportTaskIds=['main']), dict(reflection='x' * 1001)]:
+                bad = json.loads(json.dumps(state))
+                bad['dailyPlans'][0].update(mutation)
+                with self.assertRaises(ValueError):
+                    server_module.validate(bad)
+            del state['dailyPlans']
+            self.assertEqual(server_module.validate(state)['dailyPlans'], [])
+
     def test_durability_and_revision_conflict(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / 'test.sqlite3'
@@ -127,7 +146,7 @@ class ApiTests(unittest.TestCase):
         self.server.password = None
 
     def request(self, path, method='GET', data=None, headers=None):
-        request_headers = {'X-Quest-Schema': 'category-weights-v1'} if method == 'PUT' else {}
+        request_headers = {'X-Quest-Schema': 'daily-companion-v1'} if method == 'PUT' else {}
         request_headers.update(headers or {})
         req = urllib.request.Request(self.url + path, method=method, data=data, headers=request_headers)
         try:

@@ -165,3 +165,26 @@ test('legacy tasks default to a single 1x category; weights validate and fractio
   const unique=Q.task(migrated,{title:'Deduplicate',categories:['Work','work'],priority:'low',effort:'small',due:Q.day()});assert.deepEqual(unique.categories,['Work']);assert.equal(Q.taskWeight(migrated,unique),0.7);
   Q.saveCategory(migrated,'__proto__',undefined,2);assert.equal(Q.categoryWeight(migrated,'__proto__'),2);assert.equal({}.polluted,undefined);
 });
+
+test('daily plans persist, enforce distinct tasks, and preserve reflections when adjusted',()=>{
+  const s=Q.initial(),a=add(s),b=add(s,{title:'Support'}),c=add(s,{title:'Other'}),date=Q.day();
+  assert.throws(()=>Q.savePlan(s,date,a.id,[a.id]));assert.throws(()=>Q.savePlan(s,date,a.id,[b.id,c.id,'missing']));
+  assert.throws(()=>Q.savePlan(s,'2026-02-30',a.id));assert.throws(()=>Q.savePlan(s,date,'missing'));
+  Q.savePlan(s,date,a.id,[b.id]);Q.reviewDay(s,date,'  Got started with a smaller step.  ');
+  const reviewed=s.dailyPlans[0].reviewedAt;Q.status(s,a.id,'done');const earned=Q.xp(s);
+  Q.savePlan(s,date,a.id,[c.id]);assert.equal(s.dailyPlans.length,1);assert.equal(s.dailyPlans[0].reflection,'Got started with a smaller step.');assert.equal(s.dailyPlans[0].reviewedAt,reviewed);
+  assert.equal(Q.xp(s),earned);assert.equal(Q.balance(s),10);
+  const restored=Q.validate(JSON.parse(JSON.stringify(s)));assert.deepEqual(restored.dailyPlans,s.dailyPlans);
+  Q.remove(s,a.id);assert.equal(Q.validate(s).dailyPlans[0].mainTaskId,a.id);
+  assert.throws(()=>Q.reviewDay(s,'2026-01-01','No plan'));assert.throws(()=>Q.reviewDay(s,date,'x'.repeat(1001)));
+  const legacy=Q.initial();delete legacy.dailyPlans;assert.deepEqual(Q.validate(legacy).dailyPlans,[]);
+  const bad=structuredClone(restored);bad.dailyPlans.push({...bad.dailyPlans[0]});assert.throws(()=>Q.validate(bad));
+});
+test('a small step starts ten minutes without awarding XP and never replaces an existing timer',()=>{
+  let s=Q.initial();const task=add(s);Q.startSmallStep(s,task.id,'Open the report and outline three headings');
+  assert.equal(s.timer.seconds,600);assert.equal(s.timer.firstStep,'Open the report and outline three headings');assert.equal(task.events.at(-1).type,'first_step');
+  assert.equal(task.status,'queued');assert.equal(Q.xp(s),0);assert.equal(Q.balance(s),0);
+  const timer=JSON.stringify(s.timer);assert.throws(()=>Q.startSmallStep(s,task.id,'Another step'));assert.equal(JSON.stringify(s.timer),timer);
+  s=Q.validate(JSON.parse(JSON.stringify(s)));s.timer.deadline=Date.now()-1;Q.finishTimer(s);assert.equal(s.sessions[0].seconds,600);assert.equal(Q.xp(s),0);
+  Q.status(s,task.id,'done');assert.throws(()=>Q.startSmallStep(s,task.id,'Already done'));assert.equal(s.timer,null);
+});

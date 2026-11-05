@@ -25,7 +25,7 @@ ASSETS = {'/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js',
 
 
 def initial_state():
-    return dict(version=1, categories=['Work', 'Design', 'Deep work', 'Admin'], categoryWeights={}, tasks=[], ledger=[], sessions=[], timer=None, rewards=[
+    return dict(version=1, categories=['Work', 'Design', 'Deep work', 'Admin'], categoryWeights={}, dailyPlans=[], tasks=[], ledger=[], sessions=[], timer=None, rewards=[
         dict(id=str(uuid4()), name=name, cost=cost, minutes=minutes)
         for name, cost, minutes in [('Coffee break', 50, 10), ('Game time', 100, 30), ('Off-grid reset', 30, 15)]])
 
@@ -106,6 +106,26 @@ def validate(s):
     result = {key: s.get(key) for key in ['version', 'tasks', 'rewards', 'ledger', 'sessions', 'timer']}
     result['categories'] = categories
     result['categoryWeights'] = weights
+    plans = s.get('dailyPlans', [])
+    require(isinstance(plans, list) and len(plans) <= 10000)
+    dates = set()
+    task_ids = {t['id'] for t in s['tasks']}
+    for p in plans:
+        require(isinstance(p, dict) and text(p.get('date'), 10))
+        try:
+            require(datetime.strptime(p['date'], '%Y-%m-%d').strftime('%Y-%m-%d') == p['date'])
+        except ValueError:
+            raise ValueError('Invalid plan date.')
+        require(p['date'] not in dates)
+        dates.add(p['date'])
+        require(isinstance(p.get('supportTaskIds'), list) and len(p['supportTaskIds']) <= 2)
+        ids = [p.get('mainTaskId')] + p['supportTaskIds']
+        require(all(text(i, 100) and i in task_ids for i in ids))
+        require(len(set(ids)) == len(ids))
+        require('reviewedAt' in p and text(p.get('reflection'), 1000) and (p.get('reviewedAt') is None or timestamp(p['reviewedAt'])) and timestamp(p.get('updatedAt')))
+    if s.get('timer') and 'firstStep' in s['timer']:
+        require(text(s['timer']['firstStep'], 300))
+    result['dailyPlans'] = plans
     return result
 
 
@@ -216,7 +236,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.send(200, value, headers={'ETag': etag})
         elif path == '/server-config.js':
-            self.send(200, b'window.QUEST_SERVER = {enabled: true, categoryWeights: true};\n', 'text/javascript; charset=utf-8')
+            self.send(200, b'window.QUEST_SERVER = {enabled: true, categoryWeights: true, dailyCompanion: true};\n', 'text/javascript; charset=utf-8')
         elif path in ASSETS:
             asset = self.server.static_dir / ASSETS[path]
             if not asset.is_file():
@@ -251,8 +271,8 @@ class Handler(BaseHTTPRequestHandler):
             if not revision.isdecimal():
                 self.send(428, dict(error='A current If-Match revision is required.'))
                 return
-            if self.headers.get('X-Quest-Schema') != 'category-weights-v1':
-                self.send(426, dict(error='Reload the updated app before saving multi-category rewards.'))
+            if self.headers.get('X-Quest-Schema') != 'daily-companion-v1':
+                self.send(426, dict(error='Reload the updated app before saving daily plans and rewards.'))
                 return
             state = json.loads(self.rfile.read(length), parse_constant=lambda value: None)
             result = self.server.store.write(int(revision), state)

@@ -172,3 +172,13 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 The server tests use temporary databases and loopback servers. The `.openai/hosting.json` file associates this checkout with its separate private Sites deployment. It is not required for local hosting and does not connect the cloud deployment to your Mac mini. Do not copy that association into a separately registered Sites project.
+
+### Daily mission partner
+
+On Active missions, **Plan my day** chooses one main mission and up to two supporting tasks. The picker ranks active tasks using priority-aware ROI; you decide what to commit to. Planning does not change due dates, carry tasks forward, or award XP. Each local calendar day has its own plan, and earlier plans remain available in **Daily debrief**.
+
+**Help me start** opens an editable first step and starts a ten-minute focus session. It also appears as a bolt button on active task cards. Existing timers must be finished or reset first. The step is stored in task history and shown while its timer is active. Starting or finishing a session does not complete the task or award XP.
+
+**Daily debrief** shows actual first completions, earned XP, and completed focus minutes for the selected date. Save a reflection (up to 1,000 characters), review prior reflections, or revise unfinished tasks and their dates. Planned task statuses show their current state; historical metrics use recorded activity. Plans and reflections are included in JSON exports and SQLite synchronization.
+
+For this update, pull the complete checkout, **restart `server.py`**, and reload every connected browser. Existing databases and backups gain an empty `dailyPlans` list automatically. Do not delete `data/`. API integrations must preserve `dailyPlans` when updating the workspace and send `X-Quest-Schema: daily-companion-v1` with the current `If-Match` revision. Older clients receive HTTP 426 until updated, to prevent losing plans and reflections.
